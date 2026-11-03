@@ -12,6 +12,7 @@ Python state machine decides what happens next.**
 ![Tests](https://img.shields.io/badge/tests-204%20passing-2ea44f)
 ![State](https://img.shields.io/badge/database-none%20%E2%80%94%20GitHub%20is%20the%20state-24292f?logo=github)
 ![Agent](https://img.shields.io/badge/agent-Claude%20Code-D97757)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 
 [How it works](#-how-it-works) · [Lifecycle](#-the-lifecycle) · [Safety](#-safety-first) ·
 [Quick start](#-quick-start) · [Deployer](#-the-deployer) · [Docs](#-documentation)
@@ -285,6 +286,10 @@ manifest on its own. See [docs/deployer.md](docs/deployer.md).
 ```
 
 CI runs both on every push and pull request.
+
+## 📄 License
+
+[MIT](LICENSE). Use it, fork it, build on it.
 
 <div align="center">
 
