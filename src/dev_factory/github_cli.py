@@ -34,6 +34,10 @@ _TRANSIENT = re.compile(
     re.IGNORECASE,
 )
 
+# `gh api --slurp` (paginated reads) arrived in 2.48; distribution packages can be older.
+MIN_GH_VERSION = (2, 48)
+_VERSION = re.compile(r"gh version (\d+)\.(\d+)")
+
 # GitHub check conclusions that count as passing.
 PASSING_CONCLUSIONS = frozenset({"success", "neutral", "skipped"})
 
@@ -65,6 +69,12 @@ class GitHubCLI:
     def ensure_available(self) -> None:
         if shutil.which(self.executable) is None:
             raise GitHubCLIError(f"GitHub CLI not found: {self.executable}")
+        version = _VERSION.search(self.run(["--version"], check=False).stdout)
+        if version is None or tuple(map(int, version.groups())) < MIN_GH_VERSION:
+            found = ".".join(version.groups()) if version else "unknown"
+            need = ".".join(map(str, MIN_GH_VERSION))
+            raise GitHubCLIError(f"GitHub CLI {found} is too old: {need}+ is needed (install it "
+                                 "from https://cli.github.com, not the distribution package)")
         result = self.run(["auth", "status"], check=False)
         if result.returncode != 0:
             raise GitHubCLIError("GitHub CLI is not authenticated for the current identity")
