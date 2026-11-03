@@ -137,6 +137,7 @@ replace all labels in one request.**
 | Forged factory state | Markers are trusted only from the factory account |
 | Factory merges its own work | It never calls merge APIs, and merges by the factory account → `blocked` |
 | Skipping a gate by relabelling | Each stage re-checks its own evidence |
+| Agent leaks its own token | Every forwarded value of 8+ characters is replaced with `[redacted]` in the agent's result (summary, questions, commit message, review findings) before it reaches GitHub, and a changed file containing one blocks the issue without pushing |
 | Agent steals credentials | Claude runs in a Docker container (`agent_image`, set only in the host entry) with no capabilities, a read-only root, the host uid, and only the task copy mounted. Only `claude.env_passthrough` variables are forwarded, by name. Mutation mode refuses agent runs without an image |
 | Agent or test exhausts the host | Per-container memory/CPU/pid caps with swap disabled and OOM priority, a `dev-factory.slice` budget, and heavy actions deferred while the host is busy (see [operations.md](operations.md#5-host-placement-and-resources)) |
 | Agent tampers with git (hooks, config) | The agent edits a copy without `.git`. Orchestrator git runs with hooks disabled and never force-pushes |
@@ -144,7 +145,8 @@ replace all labels in one request.**
 | Agent edits CI to exfiltrate secrets | Protected paths (`.github/**` by default) block the issue |
 | Runaway loops or cost | Bounded attempts, check timeout, `max_turns`, `max_budget_usd`, one agent run per poll |
 | Production credentials in PR CI | Owner's responsibility: production secrets live in a protected environment with required reviewers. The factory never deploys |
-| Overlapping runs | `flock` lock plus systemd `OnUnitInactiveSec` |
+| Overlapping runs | One `flock` per account (`$XDG_STATE_HOME/dev-factory/factory.lock`, default `~/.local/state/…`), whatever config or `runtime_root` a run uses, plus systemd `OnUnitInactiveSec` |
+| Humans act during a long agent run | The issue and PR are read again after the run; if the issue was closed or relabelled, or the PR closed or pushed to, the work is discarded and the next poll decides again |
 
 **Known limitations:** containers need network egress (Anthropic API, package registries),
 so code in a container can reach the internet, though it holds no credentials besides the

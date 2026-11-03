@@ -229,7 +229,11 @@ privileged credentials and never deploys.
 | `none`               | The merge commit                             | A human deploys and closes the issue |
 | `github-deployments` | `candidate_workflow` succeeded on the merge commit | A successful deployment to `production_environment` contains the merge commit; the factory then closes the issue |
 
+- A successful deployment containing the merge commit is checked first: it closes the issue
+  even if the commit's own build never finished (a later commit's build shipped it).
 - Candidate ready → announced once on the issue.
+- Candidate workflow cancelled on every run (superseded in its concurrency group) → keep
+  waiting for the deployment of the later commit that carries it.
 - Candidate workflow failed → `blocked`.
 - The deployment approval gate belongs to the repository owner, e.g. a GitHub Environment with
   required reviewers.

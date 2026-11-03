@@ -427,3 +427,103 @@ def test_agent_runs_interleave_projects_within_a_priority():
     urgent = cand("a", 50, ["priority:high"])
     order = [c.name for c in interleave([*busy, quiet, urgent])]
     assert order == ["a50", "a1", "b9", "a2", "a3"]
+
+
+# -- secrets, lock, release adapter --------------------------------------------------
+
+def test_agent_output_is_scrubbed_of_its_credential(monkeypatch, tmp_path):
+    token = "sk-ant-oat01-secretsecret"
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", token)
+
+    class Runner:
+        def run(self, image, argv, *, mount, timeout, env=None, stdin=None):
+            from dev_factory.container import ContainerResult
+            return ContainerResult(0, json.dumps({
+                "subtype": "success", "is_error": False,
+                "structured_output": {
+                    "status": "needs_input", "summary": f"token is {token}",
+                    "questions": [f"use {token}?"], "commit_message": f"add {token}",
+                    "findings": [{"detail": token}]}}), "")
+
+    result = ClaudeCLI(ClaudeConfig(), Runner()).run("x", cwd=tmp_path,
+                                                     allowed_tools=("Read",), image="img")
+    assert token not in json.dumps([result.summary, result.questions, result.output])
+    assert result.summary == "token is [redacted]"
+    assert result.output["findings"][0]["detail"] == "[redacted]"
+
+
+def test_short_values_are_not_treated_as_secrets(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "abc")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert ClaudeCLI(ClaudeConfig()).secrets() == ()
+
+
+def test_workspace_finds_files_containing_a_secret(tmp_path):
+    from dev_factory.workspace import Task
+    worktree = tmp_path / "w"
+    (worktree / "src").mkdir(parents=True)
+    (worktree / "src" / "a.js").write_text("const t = 'sk-secret-value';\n")
+    (worktree / "src" / "b.js").write_text("clean\n")
+    (worktree / "link").symlink_to(worktree / "src" / "a.js")
+    task = Task("b", worktree, tmp_path / "agent", "sha")
+    ws = Workspace(tmp_path, "o/r", author_name="n", author_email="e")
+    paths = ["src/a.js", "src/b.js", "link", "deleted.js"]
+    assert ws.leaks(task, paths, ("sk-secret-value",)) == ["src/a.js"]
+    assert ws.leaks(task, paths, ()) == []
+
+
+def test_lock_is_per_account_not_per_runtime_root(monkeypatch, tmp_path):
+    from dev_factory.runtime import host_lock_path
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    assert host_lock_path() == tmp_path / "dev-factory" / "factory.lock"
+    monkeypatch.delenv("XDG_STATE_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    assert host_lock_path() == tmp_path / "home" / ".local/state/dev-factory/factory.lock"
+
+
+class _ReleaseGitHub:
+    def __init__(self, runs, deployments=(), contains=frozenset()):
+        self.runs, self.deps, self.contains = list(runs), list(deployments), contains
+
+    def workflow_runs(self, repo, sha):
+        return self.runs
+
+    def deployments(self, repo, env):
+        return self.deps
+
+    def is_ancestor(self, repo, ancestor, descendant):
+        return descendant in self.contains
+
+
+def _release(gh):
+    from dev_factory.config import ReleaseConfig
+    from dev_factory.release import GitHubDeploymentsAdapter
+    config = ReleaseConfig(adapter="github-deployments", candidate_workflow="build.yml")
+    return GitHubDeploymentsAdapter(config, gh).status("o/r", "m" * 40).state
+
+
+def _run(status="completed", conclusion="success"):
+    from dev_factory.models import WorkflowRun
+    return WorkflowRun(".github/workflows/build.yml", "build", status, conclusion, "u")
+
+
+def test_release_deployment_wins_over_an_unfinished_or_cancelled_build():
+    from dev_factory.engine import ReleaseState
+    from dev_factory.models import Deployment
+    deployed = [Deployment(1, "d" * 40, "production", "success")]
+    for runs in ([_run("in_progress", None)], [_run(conclusion="cancelled")], []):
+        gh = _ReleaseGitHub(runs, deployed, {"d" * 40})
+        assert _release(gh) is ReleaseState.DEPLOYED
+
+
+def test_release_states_from_the_build():
+    from dev_factory.engine import ReleaseState
+    from dev_factory.models import Deployment
+    other = [Deployment(1, "d" * 40, "production", "success")]  # does not contain it
+    assert _release(_ReleaseGitHub([_run("in_progress", None)], other)) is ReleaseState.BUILDING
+    assert _release(_ReleaseGitHub([_run()], other)) is ReleaseState.READY
+    # Superseded by a later commit's build: wait for the deployment that carries it.
+    cancelled = [_run(conclusion="cancelled")]
+    assert _release(_ReleaseGitHub(cancelled, other)) is ReleaseState.BUILDING
+    failed = [_run(conclusion="cancelled"), _run(conclusion="failure")]
+    assert _release(_ReleaseGitHub(failed, other)) is ReleaseState.FAILED

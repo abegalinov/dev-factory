@@ -157,7 +157,10 @@ journalctl -u dev-factory-poll -f          # JSON log lines
 ```
 
 Polls start 3 minutes after the previous one ends, so they never overlap. A manual run while
-the timer's run is active exits with `SKIP` because of the lock.
+the timer's run is active exits with `SKIP` because of the lock. The lock is per account
+(`$XDG_STATE_HOME/dev-factory/factory.lock`, default `~/.local/state/dev-factory/`), so run
+manual polls as the same user with the same `HOME`, e.g.
+`sudo -u devfactory HOME=/var/lib/dev-factory …`.
 
 ## 8. Day-to-day
 

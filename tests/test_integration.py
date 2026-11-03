@@ -806,3 +806,46 @@ def test_repository_config_is_read_from_the_default_branch_head():
     report = env.poll()
     assert report.configs == {"app": head}, report
     assert env.marker(n).config_sha == head, report
+
+
+def test_agent_work_is_discarded_if_the_issue_is_relabelled_meanwhile(env: Env):
+    n = env.start()
+    env.script.push("done", [SPEC])
+    env.script.during = lambda: env.gh.relabel(n, L[Stage.BLOCKED])
+    report = env.poll()
+    assert env.gh.count("push") == 0 and env.gh.count("create_pull") == 0
+    assert "skipped" in report.issues[0].outcome
+
+
+def test_rework_is_not_pushed_to_a_pr_closed_during_the_run(env: Env):
+    n = env.to_verify()
+    pr = env.code_pr()
+    env.gh.ci(pr.head_sha, "failure")
+    env.poll()
+    assert env.stage(n) == [L[Stage.IMPLEMENT]]
+    pushes = env.gh.count("push")
+    env.script.push("done", ["src/app.py"])
+    env.script.during = lambda: env.gh.close_pull(pr.number)
+    env.poll()
+    assert env.gh.count("push") == pushes
+
+
+def test_issue_closed_during_the_run_gets_no_pr(env: Env):
+    n = env.to_implement()
+    env.script.push("done", ["src/app.py"])
+
+    def close():
+        env.gh.issues[n].state = "closed"
+    env.script.during = close
+    env.poll()
+    assert env.code_pr() is None
+
+
+def test_credential_in_a_changed_file_blocks_without_pushing(env: Env):
+    n = env.to_implement()
+    env.ws.leaky.add("src/config.js")
+    env.script.push("done", ["src/app.py", "src/config.js"])
+    env.poll()
+    assert env.stage(n) == [L[Stage.BLOCKED]]
+    assert env.gh.count("push") == 1  # only the spec
+    assert "src/config.js" in env.marker(n).last_failure

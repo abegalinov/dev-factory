@@ -9,7 +9,7 @@ import logging
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,9 @@ log = logging.getLogger(__name__)
 # Never forwarded, even if listed in env_passthrough.
 _FORBIDDEN_ENV = frozenset({"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "SSH_AUTH_SOCK"})
 _BASE_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TZ")
+# Forwarded values at least this long are treated as secrets and scrubbed from agent output.
+MIN_SECRET_LENGTH = 8
+REDACTED = "[redacted]"
 NO_ATTRIBUTION = {"attribution": {"commit": "", "pr": ""}, "includeCoAuthoredBy": False}
 
 RESULT_SCHEMA = {
@@ -96,6 +99,11 @@ class ClaudeCLI:
             if name in source and name not in _FORBIDDEN_ENV
         }
 
+    def secrets(self) -> tuple[str, ...]:
+        """Values the agent receives (its token) that must never leave through its output."""
+        return tuple(v for v in self.environment(base=False).values()
+                     if len(v) >= MIN_SECRET_LENGTH)
+
     def command(
         self, allowed_tools: tuple[str, ...], schema: dict[str, Any] = RESULT_SCHEMA,
     ) -> list[str]:
@@ -123,8 +131,17 @@ class ClaudeCLI:
         self, prompt: str, *, cwd: Path, allowed_tools: tuple[str, ...], image: str | None = None,
         schema: dict[str, Any] = RESULT_SCHEMA,
     ) -> AgentResult:
+        """Everything in the result is scrubbed of secrets: it ends up in commits and comments."""
         if image is not None:
-            return self._run_in_container(prompt, cwd, allowed_tools, image, schema)
+            result = self._run_in_container(prompt, cwd, allowed_tools, image, schema)
+        else:
+            result = self._run_on_host(prompt, cwd, allowed_tools, schema)
+        return redact_result(result, self.secrets())
+
+    def _run_on_host(
+        self, prompt: str, cwd: Path, allowed_tools: tuple[str, ...],
+        schema: dict[str, Any] = RESULT_SCHEMA,
+    ) -> AgentResult:
         self.ensure_available()
         try:
             proc = subprocess.run(
@@ -156,6 +173,27 @@ class ClaudeCLI:
         except ContainerTimeout as exc:
             return AgentResult.failure(f"Claude timed out: {exc}")
         return parse_result(result.returncode, result.stdout, result.stderr)
+
+
+def redact(value: Any, secrets: tuple[str, ...]) -> Any:
+    """value with every occurrence of a secret replaced, through nested lists and dicts."""
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, REDACTED)
+        return value
+    if isinstance(value, list | tuple):
+        return type(value)(redact(v, secrets) for v in value)
+    if isinstance(value, dict):
+        return {k: redact(v, secrets) for k, v in value.items()}
+    return value
+
+
+def redact_result(result: AgentResult, secrets: tuple[str, ...]) -> AgentResult:
+    if not secrets:
+        return result
+    return replace(result, summary=redact(result.summary, secrets),
+                   questions=redact(result.questions, secrets),
+                   output=redact(result.output, secrets))
 
 
 def read_env_file(path: Path | None) -> dict[str, str]:

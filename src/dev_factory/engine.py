@@ -429,7 +429,8 @@ def _decide_release(snap: Snapshot, marker: StateMarker, policy: PolicyConfig) -
     if release.state is ReleaseState.FAILED:
         return _block(stage, f"release candidate failed: {release.detail}", marker)
     if release.state is ReleaseState.BUILDING:
-        return _wait(stage, f"release candidate {release.candidate} is building")
+        detail = f" ({release.detail})" if release.detail else ""
+        return _wait(stage, f"release candidate {release.candidate} is building{detail}")
     if release.state is ReleaseState.DEPLOYED:
         return Decision(Action.CLOSE, f"{release.candidate} deployed to production: "
                                       f"{release.detail}", stage=stage, marker=marker)
