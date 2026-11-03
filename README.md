@@ -206,8 +206,15 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"     # or use uv
 .venv/bin/dev-factory poll                                      # one pass, observe-only by default
 ```
 
-Then follow [docs/operations.md](docs/operations.md): build the agent image, run an observe-only
-trial, and enable the systemd timer.
+On a server, one script installs the systemd timer (observe-only until you pass `--mutate`):
+
+```bash
+sudo sh deploy/host/install-factory.sh --project config/projects/<id>.yaml \
+  --gh-user <factory-account> --agent-env ~/.config/dev-factory/agent.env
+```
+
+[docs/operations.md](docs/operations.md) walks through it: the agent image, an observe-only
+trial, then mutation mode.
 
 ### Commands
 

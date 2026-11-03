@@ -120,10 +120,14 @@ credentials, and nothing else from the host.
 ```bash
 docker build -t dev-factory-agent-node20:2.1.311 deploy/agent    # Node 20 + yarn + Claude Code
 claude setup-token                                               # long-lived agent token
-sudo install -d -m 700 -o devfactory /etc/dev-factory
-echo 'CLAUDE_CODE_OAUTH_TOKEN=...' | sudo tee /etc/dev-factory/agent.env >/dev/null
-sudo chmod 600 /etc/dev-factory/agent.env && sudo chown devfactory /etc/dev-factory/agent.env
+install -D -m 600 /dev/null ~/.config/dev-factory/agent.env
+echo 'CLAUDE_CODE_OAUTH_TOKEN=...' > ~/.config/dev-factory/agent.env
 ```
+
+The file is `claude.env_file` (default `~/.config/dev-factory/agent.env`) and must be mode
+600. The systemd install below copies it into the `devfactory` account. Keep it out of
+`/etc/dev-factory` on a host that also runs the [deployer](deployer.md): that directory holds
+the deployer's tokens and is mounted into its container.
 
 Set `agent_image` (and `verification_image` for container verification) in the host entry
 `config/projects/<id>.yaml`. Repositories cannot choose images.
@@ -145,16 +149,25 @@ watch a few polls by hand before installing the timer.
 
 ### systemd
 
+`deploy/host/install-factory.sh` does the whole install and is safe to run again to update:
+a `devfactory` system user in the `docker` group (HOME `/var/lib/dev-factory`), a clone in
+`/opt/dev-factory` with a virtualenv, your project registrations (enabled), the factory
+account's `gh` login, the agent token, `validate` and `doctor`, and the systemd units.
+
 ```bash
-sudo useradd --system --home-dir /var/lib/dev-factory --create-home --groups docker devfactory
-sudo chown -R devfactory:devfactory /opt/dev-factory
-sudo -u devfactory -H gh auth login
-sudo cp deploy/systemd/dev-factory.slice deploy/systemd/dev-factory-poll.{service,timer} \
-  /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now dev-factory-poll.timer
+sudo sh deploy/host/install-factory.sh \
+  --project config/projects/<id>.yaml \
+  --gh-user <factory-account> \
+  --agent-env ~/.config/dev-factory/agent.env
+# Later, after the observe-only polls look right:
+sudo sh /opt/dev-factory/deploy/host/install-factory.sh --mutate
 journalctl -u dev-factory-poll -f          # JSON log lines
 ```
+
+`--gh-user` copies that account's token from your own `gh` login (`gh auth token --user`),
+not your whole `gh` config. Without `--mutate` the timer runs observe-only. Host config edits
+in `/opt/dev-factory/config` survive updates (`git pull --autostash`). To stop:
+`sudo systemctl disable --now dev-factory-poll.timer`.
 
 Polls start 3 minutes after the previous one ends, so they never overlap. A manual run while
 the timer's run is active exits with `SKIP` because of the lock. The lock is per account
