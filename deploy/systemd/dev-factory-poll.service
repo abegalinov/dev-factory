@@ -23,6 +23,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/dev-factory/.runtime /var/lib/dev-factory
-# Agent credential (CLAUDE_CODE_OAUTH_TOKEN=...), mode 600, forwarded to containers by name.
-EnvironmentFile=-/etc/dev-factory/agent.env
+# The agent credential is read from claude.env_file (default ~/.config/dev-factory/agent.env,
+# i.e. /var/lib/dev-factory/.config/dev-factory/agent.env, mode 600) and forwarded to the
+# containers by name. Not /etc/dev-factory: that directory belongs to the deployer.
 UMask=0007
