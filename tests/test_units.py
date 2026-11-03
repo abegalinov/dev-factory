@@ -527,3 +527,17 @@ def test_release_states_from_the_build():
     assert _release(_ReleaseGitHub(cancelled, other)) is ReleaseState.BUILDING
     failed = [_run(conclusion="cancelled"), _run(conclusion="failure")]
     assert _release(_ReleaseGitHub(failed, other)) is ReleaseState.FAILED
+
+
+@pytest.mark.parametrize("version, ok", [("2.45.0", False), ("2.48.0", True), ("3.0.1", True)])
+def test_gh_older_than_2_48_is_refused(tmp_path, version, ok):
+    gh = tmp_path / "gh"
+    gh.write_text(f"#!/bin/sh\n[ \"$1\" = --version ] && echo 'gh version {version} (x)'\n"
+                  "exit 0\n")
+    gh.chmod(0o755)
+    cli = GitHubCLI(str(gh))
+    if ok:
+        cli.ensure_available()
+    else:
+        with pytest.raises(GitHubCLIError, match="too old"):
+            cli.ensure_available()

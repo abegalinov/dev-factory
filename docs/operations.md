@@ -5,7 +5,8 @@ See [architecture.md](architecture.md) for how it works.
 
 ## 1. Install
 
-Requirements: Python 3.11+, `git`, GitHub CLI `gh`, Claude Code CLI `claude`.
+Requirements: Python 3.11+, `git`, GitHub CLI `gh` 2.48+ (from [cli.github.com](https://cli.github.com);
+distribution packages such as Ubuntu 24.04's 2.45 are too old), Claude Code CLI `claude`.
 
 ```bash
 git clone git@github.com:abegalinov/dev-factory.git /opt/dev-factory

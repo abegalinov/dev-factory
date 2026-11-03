@@ -42,6 +42,10 @@ done
 for cmd in git gh python3 docker systemctl; do
   command -v "$cmd" >/dev/null || die "$cmd not found"
 done
+GH_VERSION=$(gh --version | sed -n 's/^gh version \([0-9.]*\).*/\1/p')
+if [ "$(printf '2.48\n%s\n' "$GH_VERSION" | sort -V | head -n1)" != "2.48" ]; then
+  die "gh $GH_VERSION is too old (2.48+ needed): install it from https://cli.github.com"
+fi
 for file in $PROJECTS $AGENT_ENV; do
   [ -f "$file" ] || die "$file not found"
 done
