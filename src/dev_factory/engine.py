@@ -306,9 +306,11 @@ def _decide_spec(snap: Snapshot, marker: StateMarker, policy: PolicyConfig) -> D
     if marker.attempt >= policy.max_spec_attempts:
         detail = f": {marker.last_failure}" if marker.last_failure else ""
         return _block(stage, f"spec drafting failed {marker.attempt} times{detail}", marker)
+    # A revision answers the feedback on the PR's current head: rework_base selects it.
     return Decision(Action.RUN_SPEC, "draft the specification" if pr is None
                     else f"revise spec PR #{pr.number}", stage=stage,
-                    marker=marker.evolve(attempt=marker.attempt + 1))
+                    marker=marker.evolve(attempt=marker.attempt + 1,
+                                         rework_base=pr.head_sha if pr else None))
 
 
 def _decide_spec_review(snap: Snapshot, marker: StateMarker, policy: PolicyConfig) -> Decision:
@@ -350,7 +352,8 @@ def _decide_implement(snap: Snapshot, marker: StateMarker, policy: PolicyConfig)
         return _block(stage, f"implementation failed {marker.attempt} times{detail}", marker)
     return Decision(Action.RUN_IMPLEMENT, "implement the approved spec" if pr is None
                     else f"rework code PR #{pr.number}", stage=stage,
-                    marker=marker.evolve(attempt=marker.attempt + 1))
+                    marker=marker.evolve(attempt=marker.attempt + 1,
+                                         rework_base=pr.head_sha if pr else None))
 
 
 def _decide_verify(snap: Snapshot, marker: StateMarker, policy: PolicyConfig) -> Decision:

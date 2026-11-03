@@ -849,3 +849,25 @@ def test_credential_in_a_changed_file_blocks_without_pushing(env: Env):
     assert env.stage(n) == [L[Stage.BLOCKED]]
     assert env.gh.count("push") == 1  # only the spec
     assert "src/config.js" in env.marker(n).last_failure
+
+
+def test_human_change_request_during_the_review_loop_reaches_the_spec_agent():
+    env = Env(review=True)
+    n = env.start()
+    env.script.push("done", [SPEC])
+    env.poll()  # draft
+    env.script.review(("blocking", "No acceptance criterion for errors"))
+    env.poll()  # automated review
+    env.gh.request_changes(env.spec_pr().number, "Only the service fee for now.")
+    env.script.push("done", [SPEC])
+    env.poll()  # revision: still in spec, with a human change request on the head
+    assert env.stage(n) == [L[Stage.SPEC]]
+    assert "Only the service fee for now." in env.script.prompts[-1]
+    assert "No acceptance criterion for errors" in env.script.prompts[-1]
+
+
+def test_no_changes_records_the_agents_reason(env: Env):
+    n = env.start()
+    env.script.push("done", [])
+    env.poll()
+    assert env.marker(n).last_failure == "agent produced no changes: agent done"
