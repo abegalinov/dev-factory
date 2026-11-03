@@ -220,7 +220,7 @@ class Executor:
             changed = self.workspace.collect(task)
             if not changed:
                 self.write_marker(number, comment,
-                                  marker.evolve(last_failure="agent produced no changes"),
+                                  marker.evolve(last_failure=_no_changes(result)),
                                   "spec attempt produced no changes")
                 return "spec attempt produced no changes"
             if changed != [path]:
@@ -294,7 +294,7 @@ class Executor:
                                        f"{', '.join(leaked[:10])}; nothing was pushed")
             if not changed:
                 self.write_marker(number, comment,
-                                  marker.evolve(last_failure="agent produced no changes"),
+                                  marker.evolve(last_failure=_no_changes(result)),
                                   "implementation attempt produced no changes")
                 return "implementation attempt produced no changes"
             self.workspace.commit_and_push(task, commit_message(
@@ -449,6 +449,12 @@ class Executor:
         self.write_marker(snap.issue.number, comment, decision.marker, decision.reason)
         self.gh.close_issue(self.repo, snap.issue.number)
         return "closed"
+
+
+def _no_changes(result: AgentResult) -> str:
+    """Why the agent changed nothing, in its own words: the human needs it to unblock."""
+    summary = result.summary.strip()
+    return f"agent produced no changes: {summary}" if summary else "agent produced no changes"
 
 
 def _status_summary(marker: StateMarker, note: str) -> str:
