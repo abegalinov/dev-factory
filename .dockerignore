@@ -1,0 +1,5 @@
+# Only images built from the repository root use this: the deployer (deploy/deployer/).
+# It needs the package source and nothing else (no config, workspaces or credentials).
+*
+!src/dev_factory/**
+src/dev_factory/__pycache__

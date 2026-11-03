@@ -1,0 +1,16 @@
+# Host registration of one repository. Everything else about the project lives in that
+# repository's .dev-factory/ directory, read from its default branch: see
+# examples/dev-factory/ and docs/repo-config.md.
+# Copy to config/projects/<id>.yaml (git-ignored: registrations stay on the host).
+project_id: example-project
+repository: YOUR_ORG/YOUR_REPO
+enabled: false
+# Docker image for agent runs (spec, implementation, review). It receives the Claude token,
+# so only the operator sets it. Unset: agent runs are refused.
+# Build it from deploy/agent/ (Node 20, yarn and Claude Code):
+#   docker build -t dev-factory-agent-node20:2.1.311 deploy/agent
+agent_image: dev-factory-agent-node20:2.1.311
+# Only for verification.mode: container in the repository config.
+# verification_image: null
+# Default: the repository's default branch.
+# default_branch: main

@@ -1,0 +1,119 @@
+# Dev Factory configuration for this repository: every setting, with its default noted.
+# The factory reads it from the default branch only, so changes take effect once a human
+# merges them. Agents may never change anything under .dev-factory/.
+# Reference: docs/repo-config.md in the factory repository.
+# Validate before committing: dev-factory config check .dev-factory
+#
+# This example describes a typical monorepo: Node 20 services, a React admin app and a
+# Flutter mobile app, with GitHub Actions running the tests on every pull request.
+# Settings that belong to the factory host (agent image, tools, credentials, budgets) are
+# not accepted here; see config/projects/example.yaml in the factory repository.
+
+# Required. The only supported version.
+version: 1
+
+specification:
+  # Where approved specs are committed, one file per issue: <directory>/issue-<n>.md.
+  # Default: specs/features
+  directory: docs/specs
+
+# Lifecycle label per stage. Default: factory:<stage>. Label names must be distinct; create
+# them with `dev-factory labels bootstrap`. Shown here with their default values.
+labels:
+  spec: factory:spec
+  spec_review: factory:spec-review
+  implement: factory:implement
+  verify: factory:verify
+  review: factory:review
+  release: factory:release
+  needs_input: factory:needs-input
+  blocked: factory:blocked
+
+agent:
+  # A read-only agent reviews spec and code PRs before they reach a human. Blocking
+  # findings go back to the authoring agent. Default: false
+  review: true
+  # Added to the factory's baseline (.github/**, .dev-factory/**, and the spec directory for
+  # implementation runs). An agent change to any of these blocks the issue. Keep CI,
+  # deployment, infrastructure and signing human-owned. Default: []
+  protected_paths:
+    - "docker-compose*.yml"
+    - "**/Dockerfile*"
+    - "infra/**"
+    - "apps/mobile/android/**"
+    - "apps/mobile/ios/**"
+
+# The parts of the monorepo. Agents and the reviewer see this map in every prompt; put
+# here what an agent cannot easily work out from the code. Default: []
+components:
+  - name: api
+    paths: ["services/api/**"]
+    instructions: |
+      Node 20, jest. Run only the test files you add or change, with a small heap:
+        cd services/api && NODE_OPTIONS=--max-old-space-size=384 npx jest --runInBand <file>
+  - name: gateway
+    paths: ["services/gateway/**"]
+    instructions: |
+      No unit tests. Covered only by the e2e/ suite against docker-compose.e2e.yml, which
+      CI runs: add e2e tests in e2e/ for any behavior change here.
+  - name: admin
+    paths: ["apps/admin/**"]
+    instructions: "React admin app; npm test runs its unit tests."
+  - name: mobile
+    paths: ["apps/mobile/**"]
+    instructions: |
+      Flutter. There is no Flutter SDK in the agent container: you cannot run flutter or
+      dart. Follow the existing patterns in lib/src and the test/support helpers closely,
+      and keep code analyzer-clean. Add or update widget/unit tests under test/ for every
+      behavior change. Integration tests run on an Android emulator against an in-process
+      mock API; import every new integration_test/*_test.dart in integration_test/all_tests.dart.
+
+verification:
+  # github-checks: read the repository's own CI results on the PR head. PR code never runs
+  # on the factory host. container: the factory runs `commands` on the PR head in the
+  # locked-down verification container (verification_image in the host entry) and reports
+  # the commit status dev-factory/verify. Default: github-checks
+  mode: github-checks
+  # Checks that must pass on the PR head; a check skipped because the PR does not touch its
+  # paths counts as passing. Default: [] (every reported check counts, at least one needed)
+  required_checks: [api, admin, e2e, mobile-checks, mobile-emulator]
+  # container mode only: shell commands run in order; all must succeed. Default: []
+  commands: []
+  # container mode only: limit for the whole verification run. Default: 1800
+  timeout_seconds: 1800
+
+release:
+  # none: the merge commit is the release candidate; a human deploys and closes the issue.
+  # github-deployments: candidate_workflow builds the candidate on the merge commit, and a
+  # successful deployment to production_environment closes the issue. The factory never
+  # deploys either way. Default: none
+  adapter: none
+  # github-deployments only: workflow file that builds the candidate. Default: null
+  candidate_workflow: null
+  # How the candidate is named in the announcement; {sha} is the merge commit. Default: "{sha}"
+  candidate_ref_template: "{sha}"
+  # github-deployments only: environment whose successful deployment closes the issue.
+  # Default: production
+  production_environment: production
+  # Set when the Dev Factory deployer runs on the production host (docs/deployer.md). It
+  # applies `manifest` from the default branch once a PR merged by one of the host's
+  # approvers changed it, and records the deployment in production_environment. Approvers,
+  # tokens and allowed images are configured on the host, never here. Default: null
+  # deploy:
+  #   runtime: swarm                   # docker stack deploy; the only runtime so far
+  #   manifest: deploy/production.yml  # the stack with every image pinned
+  #   stack: app                       # stack name on the host
+  #   url: https://app.example.com     # shown on each GitHub deployment. Default: null
+  deploy: null
+
+# Tighter limits than the factory host's; a value above the host's is rejected.
+# Default: the host's values (shown here as the shipped host defaults).
+policy:
+  # Spec drafting attempts before the issue is blocked.
+  max_spec_attempts: 2
+  # Implementation attempts per cycle (CI failures and review findings each use one).
+  max_implementation_attempts: 3
+  # Automated review rounds per spec or code cycle; then the PR goes to a human anyway.
+  max_review_rounds: 2
+  # Missing or pending checks this long after the head commit block the issue.
+  checks_timeout_minutes: 60

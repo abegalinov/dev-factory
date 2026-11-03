@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.env
+.env.*
+!.env.example
+.runtime*/
+# Real project registrations are operator-local; only the example is shipped.
+config/projects/*.yaml
+!config/projects/example.yaml
+workspaces/
+artifacts/
+*.log
+*.egg-info/
+uv.lock

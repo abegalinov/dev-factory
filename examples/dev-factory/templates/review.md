@@ -1,0 +1,6 @@
+- Every acceptance criterion in the spec has a test that would fail without the change.
+- Services without unit tests (see components) have e2e tests in e2e/ for changed behavior.
+- New integration tests are wired into the suite CI actually runs.
+- User-facing strings are translated for every supported language.
+- No change hides errors (swallowed exceptions, ignored futures) without a stated reason.
+- Changes stay within the spec; anything else is called out in the PR description.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Dev Factory polls periodically
+
+[Timer]
+OnBootSec=2min
+# Measured from the end of the previous run, so polls never overlap (the flock also guards
+# against manual runs).
+OnUnitInactiveSec=3min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

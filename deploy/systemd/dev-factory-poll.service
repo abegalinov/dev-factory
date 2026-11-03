@@ -1,0 +1,28 @@
+[Unit]
+Description=Dev Factory poll (one discovery/decision pass)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Shares the resource caps of all factory containers (deploy/systemd/dev-factory.slice).
+Slice=dev-factory.slice
+Nice=10
+IOSchedulingClass=idle
+User=devfactory
+Group=devfactory
+# The devfactory account's home holds gh and git credentials; keep it outside /home so
+# ProtectHome can stay on. See docs/operations.md.
+Environment=HOME=/var/lib/dev-factory
+WorkingDirectory=/opt/dev-factory
+ExecStart=/opt/dev-factory/.venv/bin/dev-factory --config-dir /opt/dev-factory/config poll
+# Must exceed claude.timeout_seconds plus git/GitHub time.
+TimeoutStartSec=3h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/dev-factory/.runtime /var/lib/dev-factory
+# Agent credential (CLAUDE_CODE_OAUTH_TOKEN=...), mode 600, forwarded to containers by name.
+EnvironmentFile=-/etc/dev-factory/agent.env
+UMask=0007

@@ -1,0 +1,42 @@
+# Builds the deployer image (deploy/deployer/Dockerfile). Pull requests only check that it
+# builds; a tag deployer-vX.Y.Z publishes ghcr.io/<this repository>/deployer:X.Y.Z, which
+# production hosts pin. There is no :latest: a host changes version only when its operator
+# changes the tag.
+name: Deployer image
+
+on:
+  pull_request:
+    paths: [src/**, deploy/deployer/**, .dockerignore, .github/workflows/deployer-image.yml]
+  push:
+    tags: ["deployer-v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name
+        id: name
+        run: |
+          version=check  # pull requests: built, never pushed
+          [ "$GITHUB_EVENT_NAME" != push ] || version=${GITHUB_REF_NAME#deployer-v}
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/deployer:${version}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/deployer/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.name.outputs.image }}
+          build-args: IMAGE=${{ steps.name.outputs.image }}

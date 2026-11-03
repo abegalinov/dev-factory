@@ -1,0 +1,18 @@
+# Caps everything the factory runs: the poll service (Slice=) and every agent/verification
+# container (docker --cgroup-parent=dev-factory.slice). Production services keep priority.
+# Sized for a 2 vCPU / 1.8 GB shared host; adjust on bigger machines.
+[Unit]
+Description=Dev Factory workloads (orchestrator and its containers)
+Before=slices.target
+
+[Slice]
+# At most one CPU in total, and a low share of it under contention (default weight is 100).
+CPUQuota=100%
+CPUWeight=20
+IOWeight=20
+# Reclaim pressure starts at MemoryHigh; the OOM killer acts inside the slice at MemoryMax,
+# so the factory, never production, pays for its own memory use.
+MemoryHigh=1000M
+MemoryMax=1200M
+MemorySwapMax=0
+TasksMax=1024
