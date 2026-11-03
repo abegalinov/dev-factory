@@ -108,6 +108,19 @@ class Workspace:
         out = self._git("diff", "--cached", "--no-renames", "--name-only", "-z", cwd=task.worktree)
         return [p for p in out.split("\0") if p]
 
+    def leaks(self, task: Task, paths: list[str], secrets: tuple[str, ...]) -> list[str]:
+        """Changed files (after collect) that contain any of the secrets."""
+        needles = [s.encode() for s in secrets]
+        found = []
+        for path in paths:
+            file = task.worktree / path
+            if not needles or file.is_symlink() or not file.is_file():
+                continue
+            data = file.read_bytes()
+            if any(n in data for n in needles):
+                found.append(path)
+        return found
+
     def commit_and_push(self, task: Task, message: str) -> str:
         name, email = self.author
         self._git("-c", f"user.name={name}", "-c", f"user.email={email}",

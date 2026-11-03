@@ -29,6 +29,7 @@ from dev_factory.runtime import (
     AlreadyRunning,
     busy_reason,
     configure_logging,
+    host_lock_path,
     host_resources,
     process_lock,
 )
@@ -261,7 +262,7 @@ def cmd_poll(config_dir: Path) -> int:
     if not any(p.enabled for p in projects):
         print("No enabled projects; nothing to poll.")
         return 0
-    with process_lock(factory.runtime_root / "factory.lock"):
+    with process_lock(host_lock_path()):
         gh = _gh(factory)
         gh.ensure_available()
         user = gh.current_user()

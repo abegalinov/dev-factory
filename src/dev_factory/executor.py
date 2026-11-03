@@ -29,7 +29,7 @@ from dev_factory.observer import Observer, verification_log_tag
 from dev_factory.prompts import implement_prompt, review_prompt, spec_prompt
 from dev_factory.repo_config import BASELINE_PROTECTED
 from dev_factory.state_machine import Stage, classify_labels
-from dev_factory.workspace import Workspace, violations
+from dev_factory.workspace import Task, Workspace, violations
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +83,20 @@ class Executor:
         if classify_labels(fresh.labels, self.project.labels).stages != snap.label_state.stages:
             raise StaleSnapshot("lifecycle labels changed since observation")
         return list(fresh.labels)
+
+    def _recheck(self, snap: Snapshot, pr: PullRequest | None) -> None:
+        """After an agent run (up to claude.timeout_seconds): nothing is pushed or posted if a
+        human closed or relabelled the issue, or closed or pushed to the PR, meanwhile."""
+        self._fresh_check(snap)
+        if pr is not None and pr.is_open:
+            fresh = self.gh.get_pull(self.repo, pr.number)
+            if not fresh.is_open:
+                raise StaleSnapshot(f"PR #{pr.number} was closed during the agent run")
+            if fresh.head_sha != pr.head_sha:
+                raise StaleSnapshot(f"head of PR #{pr.number} moved during the agent run")
+
+    def _leaks(self, task: Task, changed: list[str]) -> list[str]:
+        return self.workspace.leaks(task, changed, self.agent.secrets())
 
     def write_marker(
         self, number: int, comment: Comment | None, marker: StateMarker, note: str
@@ -196,6 +210,7 @@ class Executor:
                                     image=self.project.agent.image)
             log.info("spec agent finished", extra={"issue": number, "status": result.status,
                                                    "cost_usd": result.cost_usd})
+            self._recheck(snap, snap.spec_pr)
             if result.status == "needs_input":
                 return self._ask(snap, Stage.SPEC, marker, comment, result)
             if result.status != "done":
@@ -212,6 +227,10 @@ class Executor:
                 return self._block_now(snap, Stage.SPEC, marker, comment,
                                        f"spec agent changed files other than {path}: "
                                        f"{', '.join(changed[:10])}")
+            if self._leaks(task, changed):
+                return self._block_now(snap, Stage.SPEC, marker, comment,
+                                       f"the agent's credential appears in {path}; nothing "
+                                       "was pushed")
             self.workspace.commit_and_push(task, commit_message(
                 result, f"Spec for #{number}: {issue.title}", number, marker.attempt,
                 self.project.config_sha))
@@ -254,6 +273,7 @@ class Executor:
                                     image=agent_cfg.image)
             log.info("implementation agent finished", extra={
                 "issue": number, "status": result.status, "cost_usd": result.cost_usd})
+            self._recheck(snap, snap.code_pr)
             if result.status == "needs_input":
                 return self._ask(snap, Stage.IMPLEMENT, marker, comment, result)
             if result.status != "done":
@@ -267,6 +287,11 @@ class Executor:
             if bad:
                 return self._block_now(snap, Stage.IMPLEMENT, marker, comment,
                                        f"agent changed protected paths: {', '.join(bad[:10])}")
+            leaked = self._leaks(task, changed)
+            if leaked:
+                return self._block_now(snap, Stage.IMPLEMENT, marker, comment,
+                                       "the agent's credential appears in "
+                                       f"{', '.join(leaked[:10])}; nothing was pushed")
             if not changed:
                 self.write_marker(number, comment,
                                   marker.evolve(last_failure="agent produced no changes"),
@@ -318,6 +343,7 @@ class Executor:
                                     image=agent_cfg.image, schema=REVIEW_SCHEMA)
             log.info("review agent finished", extra={"issue": number, "status": result.status,
                                                      "cost_usd": result.cost_usd})
+            self._recheck(snap, pr)
             if result.status != "done":
                 # Advisory: after max_review_rounds the PR goes to the humans without it.
                 self.write_marker(number, comment, marker, f"review attempt failed: "

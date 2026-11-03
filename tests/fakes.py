@@ -7,6 +7,7 @@ Nth call of a method, so tests can kill the orchestrator between any two side ef
 
 import itertools
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -33,6 +34,7 @@ FACTORY = "factory-bot"
 MAINTAINER = "maintainer"
 OUTSIDER = "outsider"
 REPO = "acme/app"
+SECRET = "sk-agent-token-0123456789"
 
 
 class Crash(BaseException):  # noqa: N818 - simulates process death, not an error
@@ -355,6 +357,8 @@ class AgentScript:
     prompts: list[str] = field(default_factory=list)
 
     tools: list[tuple[str, ...]] = field(default_factory=list)
+    # Called once during the next agent run, e.g. a human acting while the agent works.
+    during: Callable[[], None] | None = None
 
     def push(self, status: str = "done", paths: list[str] | None = None,
              questions: tuple[str, ...] = (), output: dict | None = None) -> None:
@@ -383,7 +387,13 @@ class FakeAgent:
             raise AssertionError("agent invoked unexpectedly")
         result, paths = self.script.steps.pop(0)
         self.workspace.pending[cwd] = paths
+        if self.script.during is not None:
+            during, self.script.during = self.script.during, None
+            during()
         return result
+
+    def secrets(self) -> tuple[str, ...]:
+        return (SECRET,)
 
 
 class FakeRunner:
@@ -413,6 +423,8 @@ class FakeWorkspace:
         self.prepared: list[str] = []
         self.messages: list[str] = []
         self.crash_after_push = False
+        # Paths whose content contains the agent's secret.
+        self.leaky: set[str] = set()
         self._last_paths: list[str] = []
 
     def prepare(self, branch: str, base_branch: str) -> Task:
@@ -423,6 +435,9 @@ class FakeWorkspace:
     def collect(self, task: Task) -> list[str]:
         self._last_paths = sorted(self.pending.pop(task.agent_dir, []))
         return self._last_paths
+
+    def leaks(self, task: Task, paths: list[str], secrets: tuple[str, ...]) -> list[str]:
+        return [p for p in paths if p in self.leaky]
 
     def commit_and_push(self, task: Task, message: str) -> str:
         self.gh._record("push")

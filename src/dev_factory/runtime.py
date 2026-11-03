@@ -48,6 +48,13 @@ def busy_reason(res: HostResources, min_available_mb: int, max_load_per_cpu: flo
     return None
 
 
+def host_lock_path() -> Path:
+    """The poll lock, shared by every config and runtime_root this account runs with, so a
+    trial config and the timer's config can never poll at the same time."""
+    state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(state) / "dev-factory" / "factory.lock"
+
+
 @contextmanager
 def process_lock(path: Path) -> Iterator[None]:
     """Non-blocking exclusive lock. The kernel releases it if the process dies."""

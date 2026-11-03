@@ -39,16 +39,8 @@ class GitHubDeploymentsAdapter:
 
     def status(self, repo: str, merge_sha: str) -> ReleaseStatus:
         candidate = self.config.candidate_ref_template.format(sha=merge_sha)
-        workflow = self.config.candidate_workflow or ""
-        runs = [
-            r for r in self.gh.workflow_runs(repo, merge_sha)
-            if r.path.endswith(f"/{workflow}") or r.path == workflow or r.name == workflow
-        ]
-        if not runs or any(r.status != "completed" for r in runs):
-            return ReleaseStatus(ReleaseState.BUILDING, candidate)
-        if not any(r.conclusion == "success" for r in runs):
-            return ReleaseStatus(ReleaseState.FAILED, candidate,
-                                 f"{workflow} concluded {runs[0].conclusion}: {runs[0].url}")
+        # A deployment that contains the merge commit settles it, whatever happened to the
+        # build of that commit itself (a later commit's build may have shipped it).
         env = self.config.production_environment
         for deployment in self.gh.deployments(repo, env):
             if deployment.state == "success" and self.gh.is_ancestor(
@@ -56,8 +48,23 @@ class GitHubDeploymentsAdapter:
             ):
                 detail = f"deployment {deployment.id} of {deployment.sha[:12]} to {env}"
                 return ReleaseStatus(ReleaseState.DEPLOYED, candidate, detail)
-        return ReleaseStatus(ReleaseState.READY, candidate)
-
+        workflow = self.config.candidate_workflow or ""
+        runs = [
+            r for r in self.gh.workflow_runs(repo, merge_sha)
+            if r.path.endswith(f"/{workflow}") or r.path == workflow or r.name == workflow
+        ]
+        if not runs or any(r.status != "completed" for r in runs):
+            return ReleaseStatus(ReleaseState.BUILDING, candidate)
+        if any(r.conclusion == "success" for r in runs):
+            return ReleaseStatus(ReleaseState.READY, candidate)
+        if all(r.conclusion == "cancelled" for r in runs):
+            # Superseded: a newer commit queued in the same concurrency group cancelled it.
+            # That commit's build carries this one, and its deployment closes the issue.
+            return ReleaseStatus(ReleaseState.BUILDING, candidate,
+                                 "its build was superseded by a later commit")
+        failed = next(r for r in runs if r.conclusion != "cancelled")
+        return ReleaseStatus(ReleaseState.FAILED, candidate,
+                             f"{workflow} concluded {failed.conclusion}: {failed.url}")
 
 def make_adapter(config: ReleaseConfig, gh: GitHubCLI) -> ReleaseAdapter:
     if config.adapter == "github-deployments":
