@@ -164,6 +164,7 @@ sudo sh deploy/host/install-factory.sh \
 # Later, after the observe-only polls look right:
 sudo sh /opt/dev-factory/deploy/host/install-factory.sh --mutate
 journalctl -u dev-factory-poll -f          # JSON log lines
+sudo sh /opt/dev-factory/deploy/host/factory-status.sh   # one-screen status
 ```
 
 `--gh-user` copies that account's token from your own `gh` login (`gh auth token --user`),
@@ -186,4 +187,4 @@ manual polls as the same user with the same `HOME`, e.g.
 | Stop work on an issue | Close it, or remove its lifecycle label |
 | Restart an implementation from scratch | Close the code PR, delete `factory/impl/<n>`, relabel `factory:implement` |
 | Disk usage | `.runtime/` can be deleted between polls at any time |
-| Status of everything | `dev-factory poll` in observe-only mode on a copy of the config, or read the status comments |
+| Status of everything | `sudo sh /opt/dev-factory/deploy/host/factory-status.sh [--since "6 hours ago"]`: timer, last poll, failures, credentials, containers, memory, and open issues by stage (read-only) |
