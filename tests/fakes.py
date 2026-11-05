@@ -365,6 +365,16 @@ class AgentScript:
         self.steps.append((AgentResult(status, f"agent {status}", questions,
                                        output=output or {}), paths or []))
 
+    def triage(self, *questions: str, summary: str = "Add a settings page.") -> None:
+        """A triage run asking these questions (none: the issue is clear)."""
+        self.push("done", output={
+            "summary": summary, "in_scope": ["the settings page"],
+            "out_of_scope": ["the profile page"], "assumptions": ["English only"],
+            "code_findings": [{"path": "a.py", "line": 3, "finding": "a.py has no routes"}],
+            "open_questions": [{"question": q, "suggested_answer": "yes"} for q in questions],
+        })
+        self.steps[-1] = (replace(self.steps[-1][0], summary=summary), [])
+
     def review(self, *findings: tuple[str, str]) -> None:
         """A review run returning (severity, title) findings."""
         self.push("done", output={"findings": [

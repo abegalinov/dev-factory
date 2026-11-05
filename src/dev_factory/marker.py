@@ -28,6 +28,9 @@ class StateMarker:
     candidate_posted: bool = False
     # Automated review rounds started in the current spec or code cycle.
     review_round: int = 0
+    # Triage (agent.triage): rounds posted, and whether the spec may be drafted.
+    triage_round: int = 0
+    triaged: bool = False
     # Default-branch commit of the repository's .dev-factory/ config last used for this issue.
     config_sha: str | None = None
     updated_at: str | None = None

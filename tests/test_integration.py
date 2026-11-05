@@ -45,7 +45,7 @@ MUTATIONS = ("create_comment", "update_comment", "set_labels", "create_pull", "p
 class Env:
     def __init__(self, *, observe_only: bool = False, isolated: bool = True,
                  max_impl: int = 3, labels: bool = True, container_verify: bool = False,
-                 review: bool = False):
+                 review: bool = False, triage: bool = False):
         self.clock = Clock()
         self.gh = FakeGitHub(self.clock, labels=labels)
         self.ws = FakeWorkspace(self.gh)
@@ -68,7 +68,9 @@ class Env:
                               implementation_prompt=PROMPTS / "implement.md",
                               image="agent:test" if isolated else None,
                               review=review,
-                              review_prompt=PROMPTS / "review.md" if review else None),
+                              review_prompt=PROMPTS / "review.md" if review else None,
+                              triage=triage,
+                              triage_prompt=PROMPTS / "triage.md" if triage else None),
             verification=VerificationConfig(
                 mode="container", image="verify:test",
                 commands=("npm ci", "npm test"),
@@ -902,3 +904,87 @@ def test_revisions_that_change_nothing_still_block_after_a_change_request():
     env.poll()  # attempt 2: no changes
     env.poll()
     assert env.stage(n) == [L[Stage.BLOCKED]]
+
+
+def triage_comments(env: Env, n: int) -> list[str]:
+    return [c.body for c in env.gh.factory_comments(n) if "dev-factory:triage" in c.body]
+
+
+def test_triage_discusses_the_issue_before_the_spec():
+    env = Env(triage=True)
+    n = env.start()
+    env.script.triage("Also the profile page?")
+    env.poll()  # round 1: a question
+    assert env.stage(n) == [L[Stage.NEEDS_INPUT]]
+    assert env.spec_pr() is None
+    assert env.script.tools[-1] == ("Read", "Glob", "Grep")
+    [body] = triage_comments(env, n)
+    assert "Also the profile page?" in body and "*Suggested:* yes" in body
+    assert "`a.py:3`: a.py has no routes" in body
+
+    env.gh.human_comment(n, "1 no, only settings.")
+    env.poll()  # the answer resumes spec
+    assert env.stage(n) == [L[Stage.SPEC]]
+    env.script.triage()
+    env.poll()  # round 2 sees the answer and has no questions
+    assert "1 no, only settings." in env.script.prompts[-1]
+    assert "Also the profile page?" in env.script.prompts[-1]
+    assert env.marker(n).triaged
+    env.script.push("done", [SPEC])
+    env.poll()  # the spec, with the discussion
+    assert env.stage(n) == [L[Stage.SPEC_REVIEW]]
+    assert "1 no, only settings." in env.script.prompts[-1]
+    assert "No open questions" in env.script.prompts[-1]
+
+
+def test_a_clear_issue_goes_straight_to_the_spec():
+    env = Env(triage=True)
+    n = env.start()
+    env.script.triage()
+    env.poll()
+    assert env.stage(n) == [L[Stage.SPEC]]
+    assert "No open questions" in triage_comments(env, n)[0]
+    env.script.push("done", [SPEC])
+    env.poll()
+    assert env.stage(n) == [L[Stage.SPEC_REVIEW]]
+
+
+def test_triage_rounds_are_bounded():
+    env = Env(triage=True)
+    n = env.start()
+    for round_ in range(1, 4):
+        env.script.triage(f"Question {round_}?")
+        env.poll()
+        assert env.stage(n) == [L[Stage.NEEDS_INPUT]]
+        env.gh.human_comment(n, f"Answer {round_}.")
+        env.poll()
+    assert "This is the last round" in env.script.prompts[-1]
+    env.script.push("done", [SPEC])
+    env.poll()  # after 3 rounds the spec starts with the stated assumptions
+    assert env.stage(n) == [L[Stage.SPEC_REVIEW]]
+    assert len(triage_comments(env, n)) == 3
+
+
+def test_a_failed_triage_uses_a_round():
+    env = Env(triage=True)
+    n = env.start()
+    env.script.push("failed")
+    env.poll()
+    assert env.stage(n) == [L[Stage.SPEC]]
+    assert env.marker(n).triage_round == 1
+    assert triage_comments(env, n) == []
+
+
+def test_no_triage_for_an_existing_spec_pr():
+    env = Env(triage=True)
+    n = env.start()
+    env.script.triage()
+    env.poll()
+    env.script.push("done", [SPEC])
+    env.poll()
+    env.gh.request_changes(env.spec_pr().number, "Shorter, please.")
+    env.poll()  # back to spec
+    env.script.push("done", [SPEC])
+    env.poll()  # a revision, not a new triage
+    assert len(triage_comments(env, n)) == 1
+    assert "Shorter, please." in env.script.prompts[-1]

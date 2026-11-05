@@ -174,14 +174,35 @@ sees the issue, maintainer comments, the diff and the checked-out PR head.
 - The review never approves, requests changes or merges: GitHub forbids a PR's author from
   approving it, and the human gates stay human.
 
+## Triage (`agent.triage: true`)
+
+Before the first spec draft, a separate read-only Claude run (Read/Glob/Grep) discusses the
+issue in its comments, while a change is still cheap. It reads the issue, the discussion so far
+and the code, and posts one comment tagged `<!-- dev-factory:triage -->` in ASD-STE100:
+
+- **Understanding** of the task, **in scope** and **out of scope**;
+- **Assumptions** it will make unless a maintainer objects;
+- **Found in the code**: facts that change the work (conflicts, hidden scope, risks);
+- **Questions**, numbered, each with a suggested answer ("1 yes, 2 as suggested").
+
+With questions, the issue goes to `needs-input`; a maintainer's reply resumes `spec` and the
+next round triages again with the answers. With no open questions, the spec starts. At most
+`policy.max_triage_rounds` (default 3) rounds; a failed run uses one. After the last round the
+spec starts with the stated assumptions. The spec agent sees the triage comments and the
+answers, in order. Triage runs only while there is no spec PR, and again after a human
+relabels the issue (the marker's counters reset).
+
 ## Stages
 
 ### `factory:spec`
+- **Triage** (with `agent.triage`) while there is no spec PR and the issue is not triaged (see
+  Triage).
 - **Run agent** when there is no spec PR, or rework is due on it. Claude may change **only** the spec file.
 - **Review** (with `agent.review`): the open spec PR head is reviewed first; blocking findings
   start a revision (see Automated review).
 - **→ `spec-review`:** spec PR open with no rework due (or already merged), and reviewed.
-- **→ `needs-input`:** Claude returned questions. They are posted as an issue comment.
+- **→ `needs-input`:** Claude (spec or triage) returned questions. They are posted as an issue
+  comment.
 - **→ `blocked`:** attempts exhausted; spec PR closed without merging; Claude changed other files.
 
 ### `factory:spec-review` (human gate)

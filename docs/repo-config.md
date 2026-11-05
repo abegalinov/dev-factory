@@ -68,6 +68,7 @@ specification:
 labels: {}                 # stage -> label name overrides
 agent:
   review: true
+  triage: true             # discuss the issue in its comments before the spec
   protected_paths: ["docker-compose*.yml"]
 components:
   - name: mobile

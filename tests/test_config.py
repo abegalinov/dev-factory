@@ -90,6 +90,8 @@ def test_example_repository_config_is_valid_and_realistic():
     assert project.verification.required_checks == (
         "api", "admin", "e2e", "mobile-checks", "mobile-emulator")
     assert project.agent.review is True
+    assert project.agent.triage is True
+    assert project.agent.triage_prompt.name == "triage.md"
     assert "768 MB" in project.agent.instructions
     assert "mobile (apps/mobile/**)" in project.agent.instructions
     assert "## 4. Acceptance criteria" in project.spec_template
@@ -184,6 +186,8 @@ def test_repository_config_validation():
         _repo("version: 1\ncomponents:\n  - name: api\n")
     with pytest.raises(ConfigError, match="invalid YAML"):
         _repo("version: 1\n  bad: [\n")
+    with pytest.raises(ConfigError, match="agent.triage must be a boolean"):
+        _repo("version: 1\nagent:\n  triage: yes please\n")
 
 
 def test_instructions_combine_notes_and_components():

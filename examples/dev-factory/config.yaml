@@ -33,6 +33,11 @@ agent:
   # A read-only agent reviews spec and code PRs before they reach a human. Blocking
   # findings go back to the authoring agent. Default: false
   review: true
+  # Before the spec, a read-only agent discusses the issue in its comments: its
+  # understanding, scope, assumptions, problems found in the code, and questions with
+  # suggested answers. A maintainer's reply starts the next round; with no open questions
+  # the spec starts. Default: false
+  triage: true
   # Added to the factory's baseline (.github/**, .dev-factory/**, and the spec directory for
   # implementation runs). An agent change to any of these blocks the issue. Keep CI,
   # deployment, infrastructure and signing human-owned. Default: []
@@ -115,5 +120,7 @@ policy:
   max_implementation_attempts: 3
   # Automated review rounds per spec or code cycle; then the PR goes to a human anyway.
   max_review_rounds: 2
+  # Triage rounds before the spec (agent.triage); then the spec uses the stated assumptions.
+  max_triage_rounds: 3
   # Missing or pending checks this long after the head commit block the issue.
   checks_timeout_minutes: 60
