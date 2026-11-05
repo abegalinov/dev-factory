@@ -79,6 +79,9 @@ class PolicyConfig:
     # Automated review rounds per spec or code cycle; afterwards the PR goes to the human
     # gate even if blocking findings remain (the review is advisory).
     max_review_rounds: int = 2
+    # Triage rounds (agent.triage) before the spec; afterwards the spec agent proceeds
+    # with the triage's stated assumptions.
+    max_triage_rounds: int = 3
 
 
 @dataclass(frozen=True)
@@ -115,6 +118,9 @@ class AgentConfig:
     review: bool = False
     review_prompt: Path | None = None
     review_allowed_tools: tuple[str, ...] = ("Read", "Glob", "Grep")
+    # Read-only discussion of the issue in its comments before the spec (agent.triage).
+    triage: bool = False
+    triage_prompt: Path | None = None
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,8 @@ from dev_factory.state_machine import LabelState, Stage, require_transition
 VERIFY_CONTEXT = "dev-factory/verify"
 
 _REVIEW_TAG = re.compile(r"<!-- dev-factory:ai-review ([\w-]+) (\{.*?\}) -->")
+# Marks the factory's triage comments on an issue (agent.triage).
+TRIAGE_TAG = "<!-- dev-factory:triage -->"
 
 
 @dataclass(frozen=True)
@@ -146,6 +148,9 @@ class Snapshot:
     # Automated review (agent.review): the factory's review of the stage's PR head, if any.
     review_enabled: bool = False
     ai_review: AIReview | None = None
+    # Triage (agent.triage): the factory's triage comments on the issue, oldest first.
+    triage_enabled: bool = False
+    triage_notes: tuple[Comment, ...] = ()
 
 
 class Action(StrEnum):
@@ -156,11 +161,13 @@ class Action(StrEnum):
     RUN_IMPLEMENT = "run_implement"
     RUN_VERIFY = "run_verify"
     RUN_REVIEW = "run_review"
+    RUN_TRIAGE = "run_triage"
     ANNOUNCE_CANDIDATE = "announce_candidate"
     CLOSE = "close"
 
 
-AGENT_ACTIONS = frozenset({Action.RUN_SPEC, Action.RUN_IMPLEMENT, Action.RUN_REVIEW})
+AGENT_ACTIONS = frozenset({Action.RUN_SPEC, Action.RUN_IMPLEMENT, Action.RUN_REVIEW,
+                           Action.RUN_TRIAGE})
 # Long-running actions; at most runtime.max_agent_runs_per_poll of them per poll.
 HEAVY_ACTIONS = AGENT_ACTIONS | {Action.RUN_VERIFY}
 
@@ -316,6 +323,13 @@ def _decide_spec(snap: Snapshot, marker: StateMarker, policy: PolicyConfig) -> D
                      marker.evolve(attempt=0, rework_base=None, review_round=0))
     if pr is not None and snap.spec_changes_requested:
         marker = _fresh_budget(pr, marker)
+    if pr is None and snap.triage_enabled and not marker.triaged:
+        if marker.triage_round < policy.max_triage_rounds:
+            # Discuss the issue in its comments first; answers resume spec via needs_input.
+            return Decision(Action.RUN_TRIAGE,
+                            f"triage the issue (round {marker.triage_round + 1})", stage=stage,
+                            marker=marker.evolve(triage_round=marker.triage_round + 1))
+        marker = marker.evolve(triaged=True)  # rounds used up: draft with its assumptions
     if marker.attempt >= policy.max_spec_attempts:
         detail = f": {marker.last_failure}" if marker.last_failure else ""
         return _block(stage, f"spec drafting failed {marker.attempt} times{detail}", marker)

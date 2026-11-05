@@ -81,6 +81,9 @@ a reboot or a duplicate run is harmless: the next run looks again and carries on
 3. **A maintainer adds `factory:spec`.** The observer checks the issue's events: whoever applied
    the label must have Write access. Otherwise the issue is skipped.
 4. **`spec`:**
+   - With `agent.triage`, a read-only run first posts its understanding, scope, assumptions,
+     findings in the code, and questions with suggested answers. Questions go to `needs-input`
+     until a maintainer replies; then it triages again, up to 3 rounds.
    - The orchestrator records the attempt, prepares a workspace on `factory/spec/<n>`, and runs
      Claude with the issue and maintainer comments, fenced off as untrusted data.
    - Claude may change only `specs/features/issue-<n>.md`.

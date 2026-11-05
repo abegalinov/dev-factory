@@ -9,7 +9,7 @@ Python state machine decides what happens next.**
 
 [![CI](https://github.com/abegalinov/dev-factory/actions/workflows/ci.yml/badge.svg)](https://github.com/abegalinov/dev-factory/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-204%20passing-2ea44f)
+![Tests](https://img.shields.io/badge/tests-218%20passing-2ea44f)
 ![State](https://img.shields.io/badge/database-none%20%E2%80%94%20GitHub%20is%20the%20state-24292f?logo=github)
 ![Agent](https://img.shields.io/badge/agent-Claude%20Code-D97757)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
@@ -34,6 +34,7 @@ the bookkeeping, and humans keep the keys.**
 | 🙋 **Three human gates, not configurable** | A human merges the spec, merges the code and approves the release. Always |
 | 💥 **Safe to crash, safe to re-run** | Every poll rebuilds its view from GitHub, reuses what exists and changes the label last. Killed mid-step, it picks up without repeating side effects |
 | 🔒 **Sandboxed agents** | Each run gets a throwaway container: no capabilities, read-only root, no `.git`, no GitHub token, resource caps |
+| 💬 **Triage before the spec** | Optional: the agent first challenges the issue in its comments (scope, assumptions, problems in the code, questions with suggested answers) and writes the spec once it is clear |
 | 🔁 **Feedback loops built in** | CI failures, automated review findings and human change requests go back to the agent as its next task |
 | 🧩 **Project-agnostic** | A repository describes itself in `.dev-factory/`: components, checks, protected paths, release. The factory stays generic |
 
@@ -44,7 +45,9 @@ and review.
 
 ```mermaid
 flowchart LR
-    I["📝 Issue<br/>+ factory:spec"] --> S["🤖 Spec agent<br/>writes docs/specs/issue-N.md"]
+    I["📝 Issue<br/>+ factory:spec"] --> T["💬 Triage<br/>questions in comments"]
+    T -->|"🙋 maintainer answers"| T
+    T -->|"clear"| S["🤖 Spec agent<br/>writes docs/specs/issue-N.md"]
     S --> SPR["📄 Spec PR<br/>+ automated review"]
     SPR -->|"🙋 human merges"| C["🤖 Implementation agent<br/>code + tests"]
     C --> CPR["🔀 Code PR"]
@@ -145,7 +148,7 @@ stateDiagram-v2
 
 | Label | Who acts | What happens |
 |---|---|---|
-| `factory:spec` | 🤖 agent | Drafts the spec as a PR. An automated reviewer checks it first |
+| `factory:spec` | 🤖 agent | Triages the issue in its comments (optional), then drafts the spec as a PR. An automated reviewer checks it first |
 | `factory:spec-review` | 🙋 human | Merge the spec PR to approve it, or request changes |
 | `factory:implement` | 🤖 agent | Implements the approved spec with tests, opens the code PR |
 | `factory:verify` | ✅ CI | The repository's own checks run. Failures go back to the agent with the log excerpt |

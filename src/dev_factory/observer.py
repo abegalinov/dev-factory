@@ -9,6 +9,7 @@ from datetime import datetime
 from dev_factory import marker as markers
 from dev_factory.config import ProjectConfig
 from dev_factory.engine import (
+    TRIAGE_TAG,
     VERIFY_CONTEXT,
     AIReview,
     CheckState,
@@ -89,7 +90,11 @@ class Observer:
         fields: dict[str, object] = {
             "marker": marker, "authorized_comments": authorized_comments,
             "review_enabled": bool(self.project.agent and self.project.agent.review),
+            "triage_enabled": bool(self.project.agent and self.project.agent.triage),
         }
+        if stage is Stage.SPEC:
+            fields["triage_notes"] = tuple(
+                c for c in comments if c.author == self.factory_login and TRIAGE_TAG in c.body)
 
         if stage in (Stage.SPEC, Stage.SPEC_REVIEW, Stage.NEEDS_INPUT):
             pr = self.gh.find_pull_by_branch(repo, spec_branch(number))

@@ -46,7 +46,7 @@ _MAX_TEXT = 20_000  # per file: these texts go into every prompt
 
 _REPO_KEYS = {"version", "specification", "labels", "agent", "components", "verification",
               "release", "policy"}
-_REPO_AGENT_KEYS = {"review", "protected_paths"}
+_REPO_AGENT_KEYS = {"review", "triage", "protected_paths"}
 _REPO_VERIFICATION_KEYS = {"mode", "required_checks", "commands", "timeout_seconds"}
 _REPO_POLICY_KEYS = {f.name for f in fields(PolicyConfig)}
 
@@ -155,10 +155,13 @@ def _agent(
 ) -> AgentConfig:
     agent = _section(raw, "agent", _REPO_AGENT_KEYS, where)
     review = agent.get("review", False)
-    if not isinstance(review, bool):
-        raise ConfigError(f"{where}: agent.review must be a boolean")
+    triage = agent.get("triage", False)
+    for key, value in (("review", review), ("triage", triage)):
+        if not isinstance(value, bool):
+            raise ConfigError(f"{where}: agent.{key} must be a boolean")
     prompts = factory.home / "prompts"
-    for name in ("spec.md", "implement.md", *(["review.md"] if review else [])):
+    for name in ("spec.md", "implement.md", *(["review.md"] if review else []),
+                 *(["triage.md"] if triage else [])):
         if not (prompts / name).is_file():
             raise ConfigError(f"factory prompt not found: {prompts / name}")
     extra = _strings(agent.get("protected_paths"), "agent.protected_paths", where)
@@ -170,6 +173,8 @@ def _agent(
         instructions=_instructions(_text(files, INSTRUCTIONS_FILE, where), components),
         review=review,
         review_prompt=prompts / "review.md" if review else None,
+        triage=triage,
+        triage_prompt=prompts / "triage.md" if triage else None,
     )
 
 

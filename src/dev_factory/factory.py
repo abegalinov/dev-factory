@@ -173,7 +173,8 @@ class Factory:
             return []
         observer = Observer(self.gh, project, self.make_release(project), self.clock)
         executor = Executor(self.gh, project, observer, self.agent,
-                            self.make_workspace(project), self.clock, self.runner)
+                            self.make_workspace(project), self.clock, self.runner,
+                            policy=project.policy or self.config.policy)
         result = []
         for issue in discover(self.gh, project):
             try:

@@ -65,6 +65,45 @@ REVIEW_SCHEMA = {
     "required": ["status", "summary", "findings"],
 }
 
+# Triage (agent.triage): a read-only discussion of the issue before the spec. No
+# open_questions means the issue is clear and the spec starts.
+_STRINGS = {"type": "array", "items": {"type": "string"}}
+TRIAGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string", "enum": ["done", "failed"]},
+        "summary": {"type": "string"},
+        "in_scope": _STRINGS,
+        "out_of_scope": _STRINGS,
+        "assumptions": _STRINGS,
+        "code_findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "line": {"type": "integer"},
+                    "finding": {"type": "string"},
+                },
+                "required": ["finding"],
+            },
+        },
+        "open_questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "suggested_answer": {"type": "string"},
+                },
+                "required": ["question", "suggested_answer"],
+            },
+        },
+    },
+    "required": ["status", "summary", "in_scope", "out_of_scope", "assumptions",
+                 "code_findings", "open_questions"],
+}
+
 
 class ClaudeCLIError(RuntimeError):
     pass

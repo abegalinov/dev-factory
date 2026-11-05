@@ -61,4 +61,6 @@ policy:
   max_implementation_attempts: 3
   # Automated review rounds per spec or code cycle (projects with agent.review: true).
   max_review_rounds: 2
+  # Triage rounds before the spec (projects with agent.triage: true).
+  max_triage_rounds: 3
   checks_timeout_minutes: 60

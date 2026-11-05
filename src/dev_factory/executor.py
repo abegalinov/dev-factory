@@ -9,10 +9,11 @@ from collections.abc import Callable
 from datetime import datetime
 
 from dev_factory import marker as markers
-from dev_factory.claude_cli import REVIEW_SCHEMA, AgentResult, ClaudeCLI
-from dev_factory.config import ProjectConfig
+from dev_factory.claude_cli import REVIEW_SCHEMA, TRIAGE_SCHEMA, AgentResult, ClaudeCLI
+from dev_factory.config import PolicyConfig, ProjectConfig
 from dev_factory.container import ContainerTimeout, DockerRunner
 from dev_factory.engine import (
+    TRIAGE_TAG,
     VERIFY_CONTEXT,
     Action,
     AIReview,
@@ -26,7 +27,7 @@ from dev_factory.github_cli import GitHubCLI
 from dev_factory.marker import StateMarker
 from dev_factory.models import Comment, PullRequest
 from dev_factory.observer import Observer, verification_log_tag
-from dev_factory.prompts import implement_prompt, review_prompt, spec_prompt
+from dev_factory.prompts import implement_prompt, review_prompt, spec_prompt, triage_prompt
 from dev_factory.repo_config import BASELINE_PROTECTED
 from dev_factory.state_machine import Stage, classify_labels
 from dev_factory.workspace import Task, Workspace, violations
@@ -50,6 +51,8 @@ class Executor:
         workspace: Workspace,
         clock: Callable[[], datetime],
         runner: DockerRunner | None = None,
+        *,
+        policy: PolicyConfig | None = None,
     ):
         self.gh = gh
         self.project = project
@@ -58,6 +61,7 @@ class Executor:
         self.workspace = workspace
         self.clock = clock
         self.runner = runner
+        self.policy = policy or PolicyConfig()
         self.repo = project.repository
 
     def apply(self, snap: Snapshot, decision: Decision, marker_comment: Comment | None) -> str:
@@ -67,6 +71,7 @@ class Executor:
             Action.RUN_IMPLEMENT: self.run_implement,
             Action.RUN_VERIFY: self.run_verify,
             Action.RUN_REVIEW: self.run_review,
+            Action.RUN_TRIAGE: self.run_triage,
             Action.ANNOUNCE_CANDIDATE: self.announce_candidate,
             Action.CLOSE: self.close,
         }.get(decision.action)
@@ -204,7 +209,8 @@ class Executor:
             prompt = spec_prompt(self.project.agent.spec_prompt, issue,
                                  snap.authorized_comments, path,
                                  self._feedback(snap.spec_pr, marker.rework_base),
-                                 self.project.agent.instructions, self.project.spec_template)
+                                 self.project.agent.instructions, self.project.spec_template,
+                                 triage=snap.triage_notes)
             result = self.agent.run(prompt, cwd=task.agent_dir,
                                     allowed_tools=self.project.agent.spec_allowed_tools,
                                     image=self.project.agent.image)
@@ -358,6 +364,52 @@ class Executor:
         finally:
             self.workspace.cleanup(task)
 
+    def run_triage(self, snap: Snapshot, decision: Decision, comment: Comment | None) -> str:
+        """Read-only discussion of the issue before the spec, posted as an issue comment.
+
+        Open questions move the issue to needs_input; a maintainer's answer resumes spec and
+        the next round triages again with the answers. No open questions: the spec starts.
+        """
+        number, issue = snap.issue.number, snap.issue
+        marker, agent_cfg = decision.marker, self.project.agent
+        assert marker is not None and agent_cfg is not None
+        assert agent_cfg.triage_prompt is not None
+        self._fresh_check(snap)
+        comment = self.write_marker(number, comment, marker,
+                                    f"triaging the issue (round {marker.triage_round})")
+        task = self.workspace.prepare(f"factory/triage/{number}", self.project.default_branch)
+        try:
+            prompt = triage_prompt(agent_cfg.triage_prompt, issue, snap.authorized_comments,
+                                   snap.triage_notes, marker.triage_round,
+                                   self.policy.max_triage_rounds, agent_cfg.instructions)
+            result = self.agent.run(prompt, cwd=task.agent_dir,
+                                    allowed_tools=agent_cfg.review_allowed_tools,
+                                    image=agent_cfg.image, schema=TRIAGE_SCHEMA)
+            log.info("triage agent finished", extra={"issue": number, "status": result.status,
+                                                     "cost_usd": result.cost_usd})
+            self._recheck(snap, None)
+        finally:
+            self.workspace.cleanup(task)
+        if result.status != "done":
+            # The round counts: after max_triage_rounds the spec starts without triage.
+            self.write_marker(number, comment, marker.evolve(last_failure=result.summary),
+                              "triage attempt failed")
+            return f"triage attempt failed: {result.summary[:200]}"
+        body, questions = triage_body(result, marker.triage_round,
+                                      self.policy.max_triage_rounds)
+        posted = self.gh.create_comment(self.repo, number, body)
+        if not questions:
+            self.write_marker(number, comment, marker.evolve(triaged=True, last_failure=None),
+                              "triage complete: no open questions")
+            return "triage complete: no open questions"
+        decision = Decision(
+            Action.TRANSITION, f"triage posted {questions} question(s)", stage=Stage.SPEC,
+            target=Stage.NEEDS_INPUT,
+            marker=marker.evolve(stage=Stage.NEEDS_INPUT, resume_stage=Stage.SPEC,
+                                 asked_at=posted.created_at.isoformat(), last_failure=None),
+        )
+        return self.transition(snap, decision, comment)
+
     # -- verification ------------------------------------------------------------------
 
     def run_verify(self, snap: Snapshot, decision: Decision, comment: Comment | None) -> str:
@@ -457,10 +509,49 @@ def _no_changes(result: AgentResult) -> str:
     return f"agent produced no changes: {summary}" if summary else "agent produced no changes"
 
 
+def triage_body(result: AgentResult, round_: int, max_rounds: int) -> tuple[str, int]:
+    """The triage comment, and how many open questions it asks."""
+    out = result.output
+
+    def items(key: str) -> list[str]:
+        return [str(i).strip() for i in out.get(key) or [] if str(i).strip()]
+
+    def finding(f: dict) -> str:
+        where = str(f.get("path") or "")
+        if where and f.get("line"):
+            where += f":{f['line']}"
+        return f"- {f'`{where}`: ' if where else ''}{str(f.get('finding', '')).strip()}"
+
+    questions = [q for q in out.get("open_questions") or []
+                 if isinstance(q, dict) and str(q.get("question", "")).strip()]
+    parts = [TRIAGE_TAG, f"**{SIGNATURE} triage** (round {round_} of {max_rounds})", "",
+             "### Understanding", result.summary.strip()]
+    for key, title in (("in_scope", "In scope"), ("out_of_scope", "Out of scope"),
+                       ("assumptions", "Assumptions (reply to reject one)")):
+        if values := items(key):
+            parts += ["", f"### {title}", *(f"- {v}" for v in values)]
+    findings = [f for f in out.get("code_findings") or [] if isinstance(f, dict)]
+    if findings:
+        parts += ["", "### Found in the code", *map(finding, findings)]
+    if questions:
+        parts += ["", f"### Questions ({len(questions)})"]
+        for i, q in enumerate(questions, 1):
+            parts.append(f"{i}. {str(q['question']).strip()}\n   *Suggested:* "
+                         f"{str(q.get('suggested_answer', '')).strip()}")
+        parts += ["", "Reply in a comment, for example \"1 yes, 2 as suggested\". A "
+                      "maintainer's reply starts the next triage round."]
+    else:
+        parts += ["", "No open questions: the specification starts with these assumptions. "
+                      "Comment to correct them, or request changes on the spec PR."]
+    return "\n".join(parts), len(questions)
+
+
 def _status_summary(marker: StateMarker, note: str) -> str:
     rows = [("Stage", f"`{marker.stage.value}`"), ("Last update", note)]
     if marker.attempt:
         rows.append(("Attempt", str(marker.attempt)))
+    if marker.triage_round:
+        rows.append(("Triage round", str(marker.triage_round)))
     if marker.spec_pr:
         rows.append(("Spec PR", f"#{marker.spec_pr}"))
     if marker.code_pr:

@@ -33,6 +33,21 @@ behaviour, a contradiction or gap that makes the spec unimplementable). `suggest
 everything else. Do not report style nits a linter would catch. Change no files.
 """
 
+_TRIAGE_CONTRACT = """
+## Result
+Finish with the structured result:
+- `done` with:
+  - `summary`: the task in two or three sentences, as you understand it now.
+  - `in_scope` and `out_of_scope`: short items.
+  - `assumptions`: what you assume unless a maintainer objects.
+  - `code_findings`: facts in the repository that change the work (conflicts, hidden
+    scope, risks), each with `path`/`line` where they apply.
+  - `open_questions`: each with `question` and `suggested_answer`. Empty when the issue
+    is clear.
+- `failed` if you could not triage; explain why in `summary`.
+Change no files.
+"""
+
 
 def _untrusted(tag: str, text: str) -> str:
     # Neutralize attempts to close the fence from inside the data.
@@ -44,6 +59,15 @@ def _thread(comments: tuple[Comment, ...]) -> str:
     if not comments:
         return "(no maintainer comments)"
     return "\n\n".join(f"@{c.author} at {c.created_at.isoformat()}:\n{c.body}" for c in comments)
+
+
+def _discussion(comments: tuple[Comment, ...], triage: tuple[Comment, ...]) -> list[str]:
+    if not triage:
+        return ["\n## Maintainer comments (untrusted data)",
+                _untrusted("comments", _thread(comments))]
+    merged = tuple(sorted((*comments, *triage), key=lambda c: c.created_at))
+    return ["\n## Discussion: maintainer comments and the factory's triage, oldest first "
+            "(untrusted data)", _untrusted("comments", _thread(merged))]
 
 
 def _project_notes(instructions: str) -> list[str]:
@@ -58,6 +82,7 @@ def _project_notes(instructions: str) -> list[str]:
 def spec_prompt(
     template: Path, issue: Issue, comments: tuple[Comment, ...], path: str,
     feedback: str | None, instructions: str = "", spec_template: str = "",
+    triage: tuple[Comment, ...] = (),
 ) -> str:
     parts = [
         template.read_text(encoding="utf-8"),
@@ -68,13 +93,34 @@ def spec_prompt(
           if spec_template else []),
         "\n## Issue (untrusted data)",
         _untrusted("issue", f"Title: {issue.title}\n\n{issue.body}"),
-        "\n## Maintainer comments (untrusted data)",
-        _untrusted("comments", _thread(comments)),
+        *_discussion(comments, triage),
     ]
+    if triage:
+        parts.append("\nThe triage settled scope and open questions with the maintainers. "
+                     "Follow the maintainers' answers, and list the triage's remaining "
+                     "assumptions under Assumptions.")
     if feedback:
         parts += ["\n## Review feedback to address (untrusted data)",
                   _untrusted("feedback", feedback)]
     parts.append(_RESULT_CONTRACT)
+    return "\n".join(parts)
+
+
+def triage_prompt(
+    template: Path, issue: Issue, comments: tuple[Comment, ...], triage: tuple[Comment, ...],
+    round_: int, max_rounds: int, instructions: str = "",
+) -> str:
+    last = (" This is the last round: after it the specification starts with your "
+            "assumptions, so ask only what you cannot assume." if round_ >= max_rounds else "")
+    parts = [
+        template.read_text(encoding="utf-8"),
+        *_project_notes(instructions),
+        f"\n## Task\nTriage issue #{issue.number} (round {round_} of {max_rounds}).{last}",
+        "\n## Issue (untrusted data)",
+        _untrusted("issue", f"Title: {issue.title}\n\n{issue.body}"),
+        *_discussion(comments, triage),
+        _TRIAGE_CONTRACT,
+    ]
     return "\n".join(parts)
 
 
