@@ -21,7 +21,12 @@ _REVIEW_CONTRACT = """
 Finish with the structured result:
 - `done` with `summary` (two or three sentences: overall assessment) and `findings`.
 - `failed` if you could not review; explain why in `summary`.
-Each finding has `severity`, `title`, `detail`, and `path`/`line` where they apply.
+Each finding has `severity`, `title` (one short sentence), and `path`/`line` where they
+apply, and:
+- `problem`: what is wrong, and which requirement, criterion or comment it breaks.
+- `evidence`: what you found in the files: the line, value or text, quoted where short.
+- `impact`: what goes wrong for users, the build or the reviewer if nobody fixes it.
+- `fix`: the change to make, as numbered or short imperative steps.
 `blocking`: must be fixed before a human should spend time on this PR (a requirement or
 acceptance criterion missed, a bug, a security or data-loss risk, missing tests for new
 behaviour, a contradiction or gap that makes the spec unimplementable). `suggestion`:

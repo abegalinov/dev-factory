@@ -6,10 +6,11 @@ from pathlib import Path
 import pytest
 
 from dev_factory import marker as markers
-from dev_factory.claude_cli import ClaudeCLI, parse_result
+from dev_factory.claude_cli import AgentResult, ClaudeCLI, parse_result
 from dev_factory.config import ClaudeConfig, DockerConfig
 from dev_factory.container import DockerRunner
 from dev_factory.engine import CheckState, changes_requested, summarize_checks
+from dev_factory.executor import review_body
 from dev_factory.github_cli import GitHubCLI, GitHubCLIError, NotFoundError
 from dev_factory.labels import catalog, plan_bootstrap, priority_rank
 from dev_factory.models import Check, Comment, Label, PullRequest, Review
@@ -541,3 +542,23 @@ def test_gh_older_than_2_48_is_refused(tmp_path, version, ok):
     else:
         with pytest.raises(GitHubCLIError, match="too old"):
             cli.ensure_available()
+
+
+def test_review_body_shows_each_part_of_a_finding():
+    finding = {"severity": "blocking", "title": "The sitemap date changes", "path": "b.py",
+               "line": 9, "problem": "Criterion 2 fails.", "evidence": "`date.today()`",
+               "impact": "A second run\nchanges a file.", "fix": "Exclude `sitemap.xml`."}
+    body, review = review_body(AgentResult("done", "One problem.",
+                                           output={"findings": [finding]}), "a" * 40)
+    assert review.blocking == 1
+    assert ("- **The sitemap date changes** (`b.py:9`)\n"
+            "  - **Problem:** Criterion 2 fails.\n"
+            "  - **Evidence:** `date.today()`\n"
+            "  - **Why it matters:** A second run\n    changes a file.\n"
+            "  - **Fix:** Exclude `sitemap.xml`.") in body
+
+
+def test_review_body_keeps_free_text_findings():
+    finding = {"severity": "suggestion", "title": "Old", "detail": "free text"}
+    body, _ = review_body(AgentResult("done", "s", output={"findings": [finding]}), "a" * 40)
+    assert "- **Old**\n  free text" in body

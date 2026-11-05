@@ -368,8 +368,9 @@ class AgentScript:
     def review(self, *findings: tuple[str, str]) -> None:
         """A review run returning (severity, title) findings."""
         self.push("done", output={"findings": [
-            {"severity": sev, "title": title, "detail": f"{title}: details", "path": "a.py",
-             "line": 3} for sev, title in findings]})
+            {"severity": sev, "title": title, "problem": f"{title}: problem",
+             "evidence": "line 3", "impact": "it breaks", "fix": "Change line 3.",
+             "path": "a.py", "line": 3} for sev, title in findings]})
 
 
 class FakeAgent:
