@@ -66,7 +66,12 @@ class Observer:
         )
         stage = label_state.stage
         if stage is None:
-            return base, None
+            if not label_state.is_conflicting:
+                return base, None
+            # Blocking on conflicting labels updates the existing status comment instead of
+            # starting a second one with an empty state.
+            found = markers.find(self.gh.list_comments(repo, number), self.factory_login)
+            return (replace(base, marker=found[1]), found[0]) if found else (base, None)
 
         label = self.project.labels[stage]
         applied = [e for e in self.gh.label_events(repo, number)
