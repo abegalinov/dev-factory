@@ -242,6 +242,17 @@ def _needs_rework(pr: PullRequest | None, marker: StateMarker, requested: bool) 
     return pr is not None and (requested or marker.rework_base == pr.head_sha)
 
 
+def _fresh_budget(pr: PullRequest, marker: StateMarker) -> StateMarker:
+    """A human's new change request starts a fresh attempt budget: only failed runs use it.
+
+    rework_base on the head means a revision for this request already ran and changed
+    nothing; those runs keep counting, so the issue still blocks.
+    """
+    if marker.rework_base == pr.head_sha:
+        return marker
+    return marker.evolve(attempt=0, review_round=0, last_failure=None)
+
+
 def _review_gate(
     snap: Snapshot, stage: Stage, pr: PullRequest, marker: StateMarker, policy: PolicyConfig,
     *, rework_allowed: bool,
@@ -303,6 +314,8 @@ def _decide_spec(snap: Snapshot, marker: StateMarker, policy: PolicyConfig) -> D
         return _move(stage, Stage.SPEC_REVIEW,
                      f"spec PR #{pr.number} is open for review{_review_note(snap, marker)}",
                      marker.evolve(attempt=0, rework_base=None, review_round=0))
+    if pr is not None and snap.spec_changes_requested:
+        marker = _fresh_budget(pr, marker)
     if marker.attempt >= policy.max_spec_attempts:
         detail = f": {marker.last_failure}" if marker.last_failure else ""
         return _block(stage, f"spec drafting failed {marker.attempt} times{detail}", marker)
@@ -347,6 +360,8 @@ def _decide_implement(snap: Snapshot, marker: StateMarker, policy: PolicyConfig)
     if pr is not None and (pr.merged or not _needs_rework(pr, marker, snap.code_changes_requested)):
         return _move(stage, Stage.VERIFY, f"code PR #{pr.number} is ready for verification",
                      marker.evolve(code_pr=pr.number, rework_base=None))
+    if pr is not None and snap.code_changes_requested:
+        marker = _fresh_budget(pr, marker)
     if marker.attempt >= policy.max_implementation_attempts:
         detail = f": {marker.last_failure}" if marker.last_failure else ""
         return _block(stage, f"implementation failed {marker.attempt} times{detail}", marker)

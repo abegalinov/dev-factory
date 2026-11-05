@@ -871,3 +871,34 @@ def test_no_changes_records_the_agents_reason(env: Env):
     env.script.push("done", [])
     env.poll()
     assert env.marker(n).last_failure == "agent produced no changes: agent done"
+
+
+def test_a_human_change_request_after_the_review_loop_gets_fresh_attempts():
+    env = Env(review=True)
+    n = env.start()
+    env.script.push("done", [SPEC])
+    env.poll()  # draft: attempt 1
+    env.script.review(("blocking", "No acceptance criterion for errors"))
+    env.poll()  # automated review
+    env.script.push("done", [SPEC])
+    env.poll()  # revision for the review: attempt 2 of 2
+    env.gh.request_changes(env.spec_pr().number, "Remove the generator scripts.")
+    env.script.push("done", [SPEC])
+    env.poll()  # the human's request: a fresh budget, not "failed 2 times"
+    assert env.stage(n) == [L[Stage.SPEC]]
+    assert "Remove the generator scripts." in env.script.prompts[-1]
+    assert env.marker(n).attempt == 1
+
+
+def test_revisions_that_change_nothing_still_block_after_a_change_request():
+    env = Env(review=True)
+    n = env.start()
+    env.script.push("done", [SPEC])
+    env.poll()
+    env.gh.request_changes(env.spec_pr().number, "Remove the generator scripts.")
+    env.script.push("done", [])
+    env.poll()  # attempt 1 for the request: no changes
+    env.script.push("done", [])
+    env.poll()  # attempt 2: no changes
+    env.poll()
+    assert env.stage(n) == [L[Stage.BLOCKED]]

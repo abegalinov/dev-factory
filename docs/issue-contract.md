@@ -161,7 +161,9 @@ sees the issue, maintainer comments, the diff and the checked-out PR head.
   `<!-- dev-factory:ai-review <sha> {"blocking": n, "suggestions": m} -->`. The tag on the
   current head is how the next poll knows the review is done; a new push needs a new review.
 - **Blocking** findings go back to the authoring agent as review feedback on that commit
-  (spec: revise; code: `verify → implement`). This uses an agent attempt.
+  (spec: revise; code: `verify → implement`). This uses an agent attempt. A human's new
+  change request starts a fresh attempt budget, in any stage, so it is never refused for
+  attempts the review loop used.
 - **Advisory, bounded:** at most `policy.max_review_rounds` (default 2) reviews per cycle. When
   rounds or attempts are exhausted, or the reviewer fails, the PR goes to the human gate anyway,
   and the transition comment says what the review found. The counter resets when a human
