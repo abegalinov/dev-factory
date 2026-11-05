@@ -9,6 +9,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -80,7 +81,8 @@ class GitHubCLI:
             raise GitHubCLIError("GitHub CLI is not authenticated for the current identity")
 
     def run(
-        self, args: list[str], *, check: bool = True, stdin: str | None = None
+        self, args: list[str], *, check: bool = True, stdin: str | None = None,
+        timeout: int | None = None,
     ) -> subprocess.CompletedProcess[str]:
         try:
             result = subprocess.run(
@@ -88,7 +90,7 @@ class GitHubCLI:
                 input=stdin,
                 text=True,
                 capture_output=True,
-                timeout=self.timeout_seconds,
+                timeout=timeout or self.timeout_seconds,
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
@@ -355,6 +357,29 @@ class GitHubCLI:
             )
             for r in data.get("workflow_runs", [])
         ]
+
+    # -- artifacts and release assets (demo videos) --------------------------
+
+    def find_artifact(self, repo: str, sha: str, name: str) -> int | None:
+        """The workflow run id of the newest unexpired artifact `name` built on sha."""
+        data = self._get(f"repos/{repo}/actions/artifacts?name={quote(name)}&per_page=100")
+        runs = [a["workflow_run"] for a in data.get("artifacts", [])
+                if not a.get("expired") and (a.get("workflow_run") or {}).get("head_sha") == sha]
+        return int(runs[0]["id"]) if runs else None
+
+    def download_artifact(self, repo: str, run_id: int, name: str, dest: Path) -> None:
+        self.run(["run", "download", str(run_id), "-R", repo, "-n", name, "-D", str(dest)],
+                 timeout=600)
+
+    def upload_release_asset(self, repo: str, tag: str, path: Path) -> str:
+        """Uploads (or replaces) an asset on the pre-release `tag`, created if missing."""
+        if self.run(["release", "view", tag, "-R", repo], check=False).returncode != 0:
+            self.run(["release", "create", tag, "-R", repo, "--prerelease", "--latest=false",
+                      "--title", "Dev Factory evidence",
+                      "--notes", "Demo videos recorded by CI for factory pull requests. "
+                                 "Managed by Dev Factory; not a product release."])
+        self.run(["release", "upload", tag, str(path), "-R", repo, "--clobber"], timeout=600)
+        return f"https://github.com/{repo}/releases/download/{quote(tag)}/{quote(path.name)}"
 
     def deployments(self, repo: str, environment: str) -> list[Deployment]:
         env = quote(environment, safe="")

@@ -186,6 +186,8 @@ def test_repository_config_validation():
         _repo("version: 1\ncomponents:\n  - name: api\n")
     with pytest.raises(ConfigError, match="invalid YAML"):
         _repo("version: 1\n  bad: [\n")
+    with pytest.raises(ConfigError, match="demo_artifact must be an artifact name"):
+        _repo("version: 1\nverification:\n  demo_artifact: ../x\n")
     with pytest.raises(ConfigError, match="agent.triage must be a boolean"):
         _repo("version: 1\nagent:\n  triage: yes please\n")
 

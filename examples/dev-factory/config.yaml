@@ -86,6 +86,11 @@ verification:
   commands: []
   # container mode only: limit for the whole verification run. Default: 1800
   timeout_seconds: 1800
+  # A GitHub Actions artifact with demo videos (.mp4 and .gif) that CI recorded on the PR
+  # head, e.g. the emulator running the feature's scenario. Once checks pass, the factory
+  # posts them on the code PR and the issue (GIF inline, mp4 as a link, both stored as
+  # assets of the pre-release factory-evidence). Default: none
+  demo_artifact: demo-video
 
 release:
   # none: the merge commit is the release candidate; a human deploys and closes the issue.

@@ -10,7 +10,7 @@ from dev_factory.claude_cli import AgentResult, ClaudeCLI, parse_result
 from dev_factory.config import ClaudeConfig, DockerConfig
 from dev_factory.container import DockerRunner
 from dev_factory.engine import CheckState, changes_requested, summarize_checks
-from dev_factory.executor import review_body
+from dev_factory.executor import demo_files, review_body
 from dev_factory.github_cli import GitHubCLI, GitHubCLIError, NotFoundError
 from dev_factory.labels import catalog, plan_bootstrap, priority_rank
 from dev_factory.models import Check, Comment, Label, PullRequest, Review
@@ -562,3 +562,15 @@ def test_review_body_keeps_free_text_findings():
     finding = {"severity": "suggestion", "title": "Old", "detail": "free text"}
     body, _ = review_body(AgentResult("done", "s", output={"findings": [finding]}), "a" * 40)
     assert "- **Old**\n  free text" in body
+
+
+def test_demo_files_publishes_only_plain_videos(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "a_demo.mp4").write_bytes(b"\x00\x00\x00\x18ftypisom")
+    (tmp_path / "a_demo.gif").write_bytes(b"GIF89a....")
+    (tmp_path / "wrong.mp4").write_bytes(b"GIF89a....")  # header does not match the type
+    (tmp_path / "page.html").write_text("<script>")
+    (tmp_path / "-flag.gif").write_bytes(b"GIF89a")  # not a plain name
+    (tmp_path / "big.gif").write_bytes(b"GIF89a" + b"\x00" * 15_000_000)
+    (tmp_path / "link.gif").symlink_to(tmp_path / "a_demo.gif")
+    assert [f.name for f in demo_files(tmp_path)] == ["a_demo.gif", "a_demo.mp4"]

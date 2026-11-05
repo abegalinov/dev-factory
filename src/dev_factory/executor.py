@@ -5,8 +5,11 @@ Order of operations for any transition: artifacts first, marker next, label last
 
 import logging
 import re
+import shutil
+import tempfile
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 from dev_factory import marker as markers
 from dev_factory.claude_cli import REVIEW_SCHEMA, TRIAGE_SCHEMA, AgentResult, ClaudeCLI
@@ -23,7 +26,7 @@ from dev_factory.engine import (
     spec_branch,
     spec_path,
 )
-from dev_factory.github_cli import GitHubCLI
+from dev_factory.github_cli import GitHubCLI, GitHubCLIError
 from dev_factory.marker import StateMarker
 from dev_factory.models import Comment, PullRequest
 from dev_factory.observer import Observer, verification_log_tag
@@ -35,6 +38,12 @@ from dev_factory.workspace import Task, Workspace, violations
 log = logging.getLogger(__name__)
 
 SIGNATURE = "Dev Factory"
+# Pre-release whose assets hold the demo videos (verification.demo_artifact).
+EVIDENCE_RELEASE = "factory-evidence"
+# Demo files are CI output of PR code: only these types, sizes and counts are published.
+_DEMO_TYPES = {".mp4": (b"ftyp", 4, 50_000_000), ".gif": (b"GIF8", 0, 15_000_000)}
+_DEMO_MAX_FILES = 6
+_DEMO_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}")
 
 
 class StaleSnapshot(RuntimeError):
@@ -121,6 +130,7 @@ class Executor:
         number = snap.issue.number
         if target is Stage.REVIEW and snap.code_pr is not None and snap.checks is not None:
             self._post_evidence(snap)
+            self._post_demo(snap)
         self.write_marker(number, comment, decision.marker, decision.reason)
         lifecycle = set(self.project.labels.values())
         keep = [name for name in labels if name not in lifecycle]
@@ -145,6 +155,44 @@ class Executor:
                 f"| Check | Result | |\n|---|---|---|\n{rows}\n\n"
                 "Verification only reads CI results; it does not approve or merge.")
         self.gh.create_comment(self.repo, pr.number, body)
+
+    def _post_demo(self, snap: Snapshot) -> None:
+        """Posts the demo videos CI recorded on the verified head, on the PR and the issue.
+
+        Best effort: a missing or broken artifact never holds up the transition.
+        """
+        name, pr = self.project.verification.demo_artifact, snap.code_pr
+        if not name or pr is None:
+            return
+        tag = f"<!-- dev-factory:demo {pr.head_sha} -->"
+        targets = [n for n in (pr.number, snap.issue.number)
+                   if not any(c.author == snap.factory_login and tag in c.body
+                              for c in self.gh.list_comments(self.repo, n))]
+        if not targets:
+            return
+        try:
+            run_id = self.gh.find_artifact(self.repo, pr.head_sha, name)
+            if run_id is None:
+                return
+            with tempfile.TemporaryDirectory() as tmp:
+                download, publish = Path(tmp) / "download", Path(tmp) / "publish"
+                self.gh.download_artifact(self.repo, run_id, name, download)
+                publish.mkdir()
+                links = []
+                for file in demo_files(download):
+                    asset = publish / f"pr-{pr.number}-{pr.head_sha[:12]}-{file.name}"
+                    shutil.copyfile(file, asset)
+                    links.append((file.name, self.gh.upload_release_asset(
+                        self.repo, EVIDENCE_RELEASE, asset)))
+        except (GitHubCLIError, OSError) as exc:
+            log.warning("demo video not published", extra={"issue": snap.issue.number,
+                                                           "error": str(exc)})
+            return
+        if not links:
+            return
+        body = demo_body(tag, pr, links)
+        for number in targets:
+            self.gh.create_comment(self.repo, number, body)
 
     def _block_now(
         self, snap: Snapshot, stage: Stage, marker: StateMarker, comment: Comment, reason: str
@@ -507,6 +555,41 @@ def _no_changes(result: AgentResult) -> str:
     """Why the agent changed nothing, in its own words: the human needs it to unblock."""
     summary = result.summary.strip()
     return f"agent produced no changes: {summary}" if summary else "agent produced no changes"
+
+
+def demo_files(directory: Path) -> list[Path]:
+    """The publishable demo videos in a downloaded artifact: known types with a matching
+    header, within the size limit, plainly named, at most _DEMO_MAX_FILES."""
+    found = []
+    for file in sorted(directory.rglob("*")):
+        rule = _DEMO_TYPES.get(file.suffix.lower())
+        if rule is None or file.is_symlink() or not file.is_file():
+            continue
+        magic, offset, limit = rule
+        if not _DEMO_NAME.fullmatch(file.name) or file.stat().st_size > limit:
+            continue
+        with file.open("rb") as handle:
+            if handle.read(offset + len(magic))[offset:] != magic:
+                continue
+        found.append(file)
+    return found[:_DEMO_MAX_FILES]
+
+
+def demo_body(tag: str, pr: PullRequest, links: list[tuple[str, str]]) -> str:
+    """One section per scenario: the GIF plays inline, the mp4 is a link."""
+    scenarios: dict[str, dict[str, str]] = {}
+    for name, url in links:
+        stem, _, suffix = name.rpartition(".")
+        scenarios.setdefault(stem, {})[suffix.lower()] = url
+    parts = [tag, f"**{SIGNATURE} demo** of PR #{pr.number} at `{pr.head_sha[:12]}`, "
+                  "recorded by CI on the emulator"]
+    for stem, urls in scenarios.items():
+        parts += ["", f"#### {stem}"]
+        if "gif" in urls:
+            parts.append(f"![{stem}]({urls['gif']})")
+        if "mp4" in urls:
+            parts.append(f"[Full video (mp4)]({urls['mp4']})")
+    return "\n".join(parts)
 
 
 def triage_body(result: AgentResult, round_: int, max_rounds: int) -> tuple[str, int]:

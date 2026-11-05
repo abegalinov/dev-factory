@@ -133,6 +133,9 @@ class VerificationConfig:
     image: str | None = None
     commands: tuple[str, ...] = ()
     timeout_seconds: int = 1800
+    # Name of a GitHub Actions artifact with demo videos (.mp4, .gif) recorded by CI on the
+    # PR head. Once checks pass, the factory posts them on the code PR and the issue.
+    demo_artifact: str | None = None
 
 
 @dataclass(frozen=True)

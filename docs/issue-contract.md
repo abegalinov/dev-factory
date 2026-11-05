@@ -234,6 +234,14 @@ relabels the issue (the marker's counters reset).
   → `implement` with the findings as feedback.
 - **→ `review`:** all considered checks passed (and, with `agent.review`, the automated review
   is done). A verification-evidence comment is posted on the PR.
+- **Demo videos** (with `verification.demo_artifact`): on the move to `review`, the factory
+  looks for that GitHub Actions artifact built on the verified head (for example the emulator
+  recording the feature's scenario). It publishes only `.mp4` and `.gif` files with a matching
+  header, plain names and bounded sizes (at most 6) as assets of the pre-release
+  `factory-evidence`, named `pr-<n>-<sha>-<file>`. Then it posts one comment, tagged
+  `<!-- dev-factory:demo <sha> -->`, on the PR and on the issue: each GIF plays inline, each mp4
+  is a link. Best effort: a missing or broken artifact never holds up the transition. The
+  recording itself is the repository's CI; PR code never runs in the orchestrator.
 - **→ `implement`:** a check failed and attempts remain. The failure is fed to the next attempt.
   For a failed GitHub Actions job, that includes an excerpt of the job log: the failing step,
   with each group printed inside it (one per failed test, a device log) cut to its first lines.
