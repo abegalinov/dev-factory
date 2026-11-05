@@ -98,6 +98,10 @@ class FakeGitHub:
         self.pull_bodies: dict[int, str] = {}
         self.contents: dict[tuple[str, str], str] = {}  # (ref, path) -> text
         self.commit_dates: dict[str, datetime] = {}
+        self.artifacts: dict[str, dict[str, bytes]] = {}  # head sha -> demo-video files
+        self.assets: dict[str, bytes] = {}  # factory-evidence asset name -> content
+        self.artifact_error: str | None = None
+        self._runs: dict[int, str] = {}  # artifact run id -> head sha
         self.calls: list[str] = []
         self._numbers = itertools.count(1)
         self._ids = itertools.count(1000)
@@ -323,6 +327,26 @@ class FakeGitHub:
 
     def checks(self, repo: str, sha: str) -> list[Check]:
         return list(self.ci_checks.get(sha, []))
+
+    def find_artifact(self, repo: str, sha: str, name: str) -> int | None:
+        if name != "demo-video" or sha not in self.artifacts:
+            return None
+        run_id = 500 + len(self._runs)
+        self._runs[run_id] = sha
+        return run_id
+
+    def download_artifact(self, repo: str, run_id: int, name: str, dest: Path) -> None:
+        if self.artifact_error:
+            raise GitHubCLIError(self.artifact_error)
+        sha = self._runs[run_id]
+        dest.mkdir(parents=True)
+        for file, data in self.artifacts[sha].items():
+            (dest / file).write_bytes(data)
+
+    def upload_release_asset(self, repo: str, tag: str, path: Path) -> str:
+        self._record("upload_release_asset")
+        self.assets[path.name] = path.read_bytes()
+        return f"https://github.com/{repo}/releases/download/{tag}/{path.name}"
 
     def job_log(self, repo: str, job_id: int) -> str:
         return self.job_logs[job_id]

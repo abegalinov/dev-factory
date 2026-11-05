@@ -45,7 +45,7 @@ MUTATIONS = ("create_comment", "update_comment", "set_labels", "create_pull", "p
 class Env:
     def __init__(self, *, observe_only: bool = False, isolated: bool = True,
                  max_impl: int = 3, labels: bool = True, container_verify: bool = False,
-                 review: bool = False, triage: bool = False):
+                 review: bool = False, triage: bool = False, demo: bool = False):
         self.clock = Clock()
         self.gh = FakeGitHub(self.clock, labels=labels)
         self.ws = FakeWorkspace(self.gh)
@@ -74,7 +74,8 @@ class Env:
             verification=VerificationConfig(
                 mode="container", image="verify:test",
                 commands=("npm ci", "npm test"),
-            ) if container_verify else VerificationConfig(),
+            ) if container_verify else VerificationConfig(
+                demo_artifact="demo-video" if demo else None),
         )
 
     def load_project(self, entry: ProjectEntry) -> ProjectConfig:
@@ -988,3 +989,59 @@ def test_no_triage_for_an_existing_spec_pr():
     env.poll()  # a revision, not a new triage
     assert len(triage_comments(env, n)) == 1
     assert "Shorter, please." in env.script.prompts[-1]
+
+
+MP4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 32
+GIF = b"GIF89a" + b"\x00" * 32
+
+
+def to_checks(env: Env, n: int):
+    env.script.push("done", [SPEC])
+    env.poll()
+    env.gh.merge(env.spec_pr().number)
+    env.poll()
+    env.script.push("done", ["src/app.py"])
+    env.poll()
+    return env.code_pr()
+
+
+def test_demo_videos_are_posted_on_the_pr_and_the_issue():
+    env = Env(demo=True)
+    n = env.start()
+    pr = to_checks(env, n)
+    env.gh.artifacts[pr.head_sha] = {
+        "issue_1_demo_test.mp4": MP4, "issue_1_demo_test.gif": GIF,
+        "fake.mp4": b"not a video", "run.sh": b"#!/bin/sh"}
+    env.gh.ci(pr.head_sha, "success")
+    env.poll()
+    assert env.stage(n) == [L[Stage.REVIEW]]
+    prefix = f"pr-{pr.number}-{pr.head_sha[:12]}-"
+    assert sorted(env.gh.assets) == [prefix + "issue_1_demo_test.gif",
+                                     prefix + "issue_1_demo_test.mp4"]
+    for number in (pr.number, n):
+        [demo] = [c.body for c in env.gh.factory_comments(number) if "dev-factory:demo" in c.body]
+        assert f"![issue_1_demo_test](https://github.com/{REPO}/releases/download/" in demo
+        assert f"[Full video (mp4)](https://github.com/{REPO}/releases/download/" in demo
+
+
+def test_no_demo_artifact_changes_nothing():
+    env = Env(demo=True)
+    n = env.start()
+    pr = to_checks(env, n)
+    env.gh.ci(pr.head_sha, "success")
+    env.poll()
+    assert env.stage(n) == [L[Stage.REVIEW]]
+    assert env.gh.assets == {}
+    assert not any("dev-factory:demo" in c.body for c in env.gh.factory_comments(n))
+
+
+def test_a_broken_demo_download_does_not_hold_up_review():
+    env = Env(demo=True)
+    n = env.start()
+    pr = to_checks(env, n)
+    env.gh.artifacts[pr.head_sha] = {"a.mp4": MP4}
+    env.gh.artifact_error = "gh run download failed (1): HTTP 500"
+    env.gh.ci(pr.head_sha, "success")
+    env.poll()
+    assert env.stage(n) == [L[Stage.REVIEW]]
+    assert env.gh.assets == {}

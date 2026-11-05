@@ -78,6 +78,7 @@ verification:
   mode: github-checks      # or container (image from the host entry)
   required_checks: [unit, e2e]
   commands: []             # container mode only
+  demo_artifact: demo-video  # CI artifact with .mp4/.gif demos, posted on the PR and issue
 release:
   adapter: none
   deploy: null             # or the deployer's settings (docs/deployer.md)

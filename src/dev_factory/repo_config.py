@@ -47,7 +47,8 @@ _MAX_TEXT = 20_000  # per file: these texts go into every prompt
 _REPO_KEYS = {"version", "specification", "labels", "agent", "components", "verification",
               "release", "policy"}
 _REPO_AGENT_KEYS = {"review", "triage", "protected_paths"}
-_REPO_VERIFICATION_KEYS = {"mode", "required_checks", "commands", "timeout_seconds"}
+_REPO_VERIFICATION_KEYS = {"mode", "required_checks", "commands", "timeout_seconds",
+                           "demo_artifact"}
 _REPO_POLICY_KEYS = {f.name for f in fields(PolicyConfig)}
 
 
@@ -187,7 +188,12 @@ def _verification(entry: ProjectEntry, raw: dict[str, Any], where: str) -> Verif
         image=entry.verification_image,
         commands=_strings(v.get("commands"), "verification.commands", where),
         timeout_seconds=int(v.get("timeout_seconds", VerificationConfig.timeout_seconds)),
+        demo_artifact=v.get("demo_artifact"),
     )
+    if config.demo_artifact is not None and not (
+            isinstance(config.demo_artifact, str) and _ARTIFACT.fullmatch(config.demo_artifact)):
+        raise ConfigError(f"{where}: verification.demo_artifact must be an artifact name "
+                          "(letters, digits, . _ -)")
     if config.mode not in ("github-checks", "container"):
         raise ConfigError(f"{where}: unknown verification mode {config.mode!r}")
     if config.mode == "container":
@@ -211,6 +217,7 @@ def _release(raw: dict[str, Any], where: str) -> ReleaseConfig:
 
 
 _STACK_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
+_ARTIFACT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 
 
 def parse_deploy(value: Any, where: str) -> DeployConfig | None:
