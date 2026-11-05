@@ -510,6 +510,11 @@ def commit_message(
     return f"{message}\n\n{trailers}"
 
 
+# The parts of a review finding (REVIEW_SCHEMA), in the order the comment shows them.
+_FINDING_FIELDS = (("problem", "Problem"), ("evidence", "Evidence"),
+                   ("impact", "Why it matters"), ("fix", "Fix"))
+
+
 def review_body(result: AgentResult, head_sha: str) -> tuple[str, AIReview]:
     findings = [f for f in result.output.get("findings") or [] if isinstance(f, dict)]
     blocking = [f for f in findings if f.get("severity") == "blocking"]
@@ -521,7 +526,15 @@ def review_body(result: AgentResult, head_sha: str) -> tuple[str, AIReview]:
         if where and f.get("line"):
             where += f":{f['line']}"
         where = f" (`{where}`)" if where else ""
-        return f"- **{f.get('title', '')}**{where}\n  {str(f.get('detail', '')).strip()}"
+        head = f"- **{f.get('title', '')}**{where}"
+        fields = [(label, str(f.get(key) or "").strip()) for key, label in _FINDING_FIELDS]
+        if not any(text for _, text in fields):  # an older result: one free-text detail
+            return f"{head}\n  {str(f.get('detail', '')).strip()}"
+        lines = [head]
+        for label, text in fields:
+            if text:
+                lines.append(f"  - **{label}:** " + text.replace("\n", "\n    "))
+        return "\n".join(lines)
 
     parts = [review.tag(), f"**{SIGNATURE} automated review** of `{head_sha[:12]}`",
              "", result.summary.strip()]

@@ -160,6 +160,9 @@ sees the issue, maintainer comments, the diff and the checked-out PR head.
 - The result is posted as a `COMMENT` review on the PR head commit, tagged
   `<!-- dev-factory:ai-review <sha> {"blocking": n, "suggestions": m} -->`. The tag on the
   current head is how the next poll knows the review is done; a new push needs a new review.
+- Each finding states the **problem** (and the requirement it breaks), the **evidence** in
+  the files, **why it matters**, and the **fix**. The review is written in ASD-STE100
+  Simplified Technical English: short active sentences, fixes as imperative steps.
 - **Blocking** findings go back to the authoring agent as review feedback on that commit
   (spec: revise; code: `verify → implement`). This uses an agent attempt.
 - **Advisory, bounded:** at most `policy.max_review_rounds` (default 2) reviews per cycle. When
