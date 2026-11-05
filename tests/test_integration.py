@@ -217,6 +217,18 @@ def test_conflicting_labels_block(env: Env):
     assert not env.script.prompts
 
 
+def test_conflicting_labels_keep_the_status_comment(env: Env):
+    n = env.start()
+    env.script.push("done", [SPEC])
+    env.poll()
+    env.gh.label(n, L[Stage.REVIEW])
+    env.poll()
+    found = [c for c in env.gh.list_comments(REPO, n) if markers.parse(c.body)]
+    assert len(found) == 1
+    marker = markers.parse(found[0].body)
+    assert marker.stage is Stage.BLOCKED and marker.spec_pr == env.spec_pr().number
+
+
 def test_human_cannot_skip_gates_by_relabelling(env: Env):
     n = env.start()
     env.gh.relabel(n, L[Stage.RELEASE])
