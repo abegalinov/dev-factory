@@ -76,9 +76,10 @@ class PolicyConfig:
     max_spec_attempts: int = 2
     max_implementation_attempts: int = 3
     checks_timeout_minutes: int = 60
-    # Automated review rounds per spec or code cycle; afterwards the PR goes to the human
-    # gate even if blocking findings remain (the review is advisory).
-    max_review_rounds: int = 2
+    # Automated reviews per spec or code PR before its first human review. Blocking
+    # findings of each go back to the authoring agent once; the last revision goes to the
+    # human gate without another review (the review is advisory).
+    max_review_rounds: int = 1
     # Triage rounds (agent.triage) before the spec; afterwards the spec agent proceeds
     # with the triage's stated assumptions.
     max_triage_rounds: int = 3
@@ -121,6 +122,9 @@ class AgentConfig:
     # Read-only discussion of the issue in its comments before the spec (agent.triage).
     triage: bool = False
     triage_prompt: Path | None = None
+    # A task the triage sizes `small` skips the spec PR: the implementation agent writes
+    # the spec into the code PR, and merging that PR approves both.
+    fast_track: bool = False
 
 
 @dataclass(frozen=True)

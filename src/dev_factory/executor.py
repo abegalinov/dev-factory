@@ -218,6 +218,8 @@ class Executor:
         return self.transition(snap, decision, comment)
 
     def _feedback(self, pr: PullRequest | None, commit: str | None) -> str | None:
+        """What to address now: reviews of the commit being reworked, and maintainers' PR
+        comments written since it was pushed."""
         if pr is None or not commit:
             return None
         items = [
@@ -225,7 +227,22 @@ class Executor:
             for author, text in self.gh.review_feedback(self.repo, pr.number, commit)
             if self.observer.has_write(author)
         ]
+        since = self.gh.commit_date(self.repo, commit)
+        items += [f"@{c.author}: {c.body}" for c in self.gh.list_comments(self.repo, pr.number)
+                  if c.created_at > since and self._maintainer(c.author)]
         return "\n\n".join(items) or None
+
+    def _maintainer(self, login: str) -> bool:
+        return login != self.observer.factory_login and self.observer.has_write(login)
+
+    def _discussion(self, snap: Snapshot, pr: PullRequest | None) -> tuple[Comment, ...]:
+        """The maintainers' issue comments and everything they wrote on the stage's PR,
+        oldest first: instructions given in a PR review must reach every agent."""
+        notes = list(snap.authorized_comments)
+        if pr is not None:
+            notes += [c for c in self.gh.pr_discussion(self.repo, pr.number)
+                      if self._maintainer(c.author)]
+        return tuple(sorted(notes, key=lambda c: c.created_at))
 
     def _recover_pushed_branch(self, branch: str, title: str, body: str) -> PullRequest | None:
         """A branch pushed before a crash, without a PR, is completed instead of redone."""
@@ -255,7 +272,7 @@ class Executor:
         task = self.workspace.prepare(branch, self.project.default_branch)
         try:
             prompt = spec_prompt(self.project.agent.spec_prompt, issue,
-                                 snap.authorized_comments, path,
+                                 self._discussion(snap, snap.spec_pr), path,
                                  self._feedback(snap.spec_pr, marker.rework_base),
                                  self.project.agent.instructions, self.project.spec_template,
                                  triage=snap.triage_notes)
@@ -302,26 +319,33 @@ class Executor:
         branch = code_branch(number)
         spec = spec_path(self.project.spec_directory, number)
         title = f"{issue.title} (#{number})"
-        body = (f"Refs #{number}\n\nImplements the approved spec `{spec}`.\n\n"
-                f"Opened by {SIGNATURE}. Merging requires human review; it does not deploy.")
+        marker = decision.marker
+        assert marker is not None
+        approval = ("Merging requires human review; it does not deploy." if not marker.fast_track
+                    else f"Small task: this PR also adds the spec `{spec}`. Merging approves "
+                         "the spec and the code; it does not deploy.")
+        body = (f"Refs #{number}\n\nImplements the "
+                f"{'' if marker.fast_track else 'approved '}spec `{spec}`.\n\n"
+                f"Opened by {SIGNATURE}. {approval}")
         if self.project.pr_body_template:
             body = (f"{_render(self.project.pr_body_template, issue=f'#{number}', spec=spec)}"
-                    f"\n\n---\nRefs #{number}. Opened by {SIGNATURE}. Merging requires human "
-                    "review; it does not deploy.")
+                    f"\n\n---\nRefs #{number}. Opened by {SIGNATURE}. {approval}")
         self._fresh_check(snap)
         if snap.code_pr is None and self._recover_pushed_branch(branch, title, body):
             return "recovered code PR"
-        marker = decision.marker
         agent_cfg = self.project.agent
-        assert marker is not None and agent_cfg is not None
+        assert agent_cfg is not None
         comment = self.write_marker(number, comment, marker,
                                     f"implementing (attempt {marker.attempt})")
         task = self.workspace.prepare(branch, self.project.default_branch)
         try:
             prompt = implement_prompt(agent_cfg.implementation_prompt, issue,
-                                      snap.authorized_comments, spec, marker.last_failure,
+                                      self._discussion(snap, snap.code_pr), spec,
+                                      marker.last_failure,
                                       self._feedback(snap.code_pr, marker.rework_base),
-                                      agent_cfg.instructions)
+                                      agent_cfg.instructions,
+                                      triage=snap.triage_notes if marker.fast_track else (),
+                                      write_spec=marker.fast_track)
             result = self.agent.run(prompt, cwd=task.agent_dir,
                                     allowed_tools=agent_cfg.implementation_allowed_tools,
                                     image=agent_cfg.image)
@@ -335,9 +359,15 @@ class Executor:
                                   "implementation attempt failed")
                 return f"implementation attempt failed: {result.summary[:200]}"
             changed = self.workspace.collect(task)
+            if marker.fast_track and snap.code_pr is None and spec not in changed:
+                self.write_marker(number, comment, marker.evolve(
+                    last_failure=f"small task: the agent did not write the spec {spec}"),
+                    "implementation attempt wrote no spec")
+                return "implementation attempt wrote no spec"
             protected = (*BASELINE_PROTECTED, *agent_cfg.protected_paths,
                          f"{self.project.spec_directory}/**")
-            bad = violations(changed, protected)
+            bad = violations([c for c in changed if not (marker.fast_track and c == spec)],
+                             protected)
             if bad:
                 return self._block_now(snap, Stage.IMPLEMENT, marker, comment,
                                        f"agent changed protected paths: {', '.join(bad[:10])}")
@@ -389,9 +419,10 @@ class Executor:
                 raise StaleSnapshot(f"branch of PR #{pr.number} moved during checkout")
             diff = self.gh.compare_diff(self.repo, self.project.default_branch, pr.head_sha)
             prompt = review_prompt(agent_cfg.review_prompt, kind, issue,
-                                   snap.authorized_comments,
+                                   self._discussion(snap, pr),
                                    spec_path(self.project.spec_directory, number), diff,
-                                   agent_cfg.instructions, self.project.review_checklist)
+                                   agent_cfg.instructions, self.project.review_checklist,
+                                   spec_in_pr=kind == "code" and marker.fast_track)
             result = self.agent.run(prompt, cwd=task.agent_dir,
                                     allowed_tools=agent_cfg.review_allowed_tools,
                                     image=agent_cfg.image, schema=REVIEW_SCHEMA)
@@ -443,8 +474,10 @@ class Executor:
             self.write_marker(number, comment, marker.evolve(last_failure=result.summary),
                               "triage attempt failed")
             return f"triage attempt failed: {result.summary[:200]}"
+        fast_track = agent_cfg.fast_track and result.output.get("size") == "small"
+        marker = marker.evolve(fast_track=fast_track)
         body, questions = triage_body(result, marker.triage_round,
-                                      self.policy.max_triage_rounds)
+                                      self.policy.max_triage_rounds, fast_track)
         posted = self.gh.create_comment(self.repo, number, body)
         if not questions:
             self.write_marker(number, comment, marker.evolve(triaged=True, last_failure=None),
@@ -592,7 +625,9 @@ def demo_body(tag: str, pr: PullRequest, links: list[tuple[str, str]]) -> str:
     return "\n".join(parts)
 
 
-def triage_body(result: AgentResult, round_: int, max_rounds: int) -> tuple[str, int]:
+def triage_body(
+    result: AgentResult, round_: int, max_rounds: int, fast_track: bool = False,
+) -> tuple[str, int]:
     """The triage comment, and how many open questions it asks."""
     out = result.output
 
@@ -609,6 +644,11 @@ def triage_body(result: AgentResult, round_: int, max_rounds: int) -> tuple[str,
                  if isinstance(q, dict) and str(q.get("question", "")).strip()]
     parts = [TRIAGE_TAG, f"**{SIGNATURE} triage** (round {round_} of {max_rounds})", "",
              "### Understanding", result.summary.strip()]
+    next_step = "specification"
+    if fast_track:
+        next_step = "implementation"
+        parts += ["", "**Small task:** no spec PR. The code PR carries a short spec, and "
+                      "merging it approves both."]
     for key, title in (("in_scope", "In scope"), ("out_of_scope", "Out of scope"),
                        ("assumptions", "Assumptions (reply to reject one)")):
         if values := items(key):
@@ -622,10 +662,10 @@ def triage_body(result: AgentResult, round_: int, max_rounds: int) -> tuple[str,
             parts.append(f"{i}. {str(q['question']).strip()}\n   *Suggested:* "
                          f"{str(q.get('suggested_answer', '')).strip()}")
         parts += ["", "Reply in a comment, for example \"1 yes, 2 as suggested\". A "
-                      "maintainer's reply starts the next triage round."]
+                      f"maintainer's reply starts the {next_step}."]
     else:
-        parts += ["", "No open questions: the specification starts with these assumptions. "
-                      "Comment to correct them, or request changes on the spec PR."]
+        parts += ["", f"No open questions: the {next_step} starts with these assumptions. "
+                      "Comment to correct them, or request changes on the PR."]
     return "\n".join(parts), len(questions)
 
 

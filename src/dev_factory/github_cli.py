@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -300,6 +301,26 @@ class GitHubCLI:
                 where = f"{c.get('path')}:{c.get('line') or c.get('original_line') or '?'}"
                 feedback.append(((c.get("user") or {}).get("login", ""), f"{where}: {c['body']}"))
         return feedback
+
+    def pr_discussion(self, repo: str, number: int) -> list[Comment]:
+        """Everything written on a PR, oldest first: review bodies, inline comments and
+        conversation comments. Each body starts with where it was written."""
+        notes = []
+        for r in self._get(f"repos/{repo}/pulls/{number}/reviews?per_page=100", paginate=True):
+            body = (r.get("body") or "").strip()
+            if body and r.get("submitted_at"):
+                state = (r.get("state") or "").lower().replace("_", " ")
+                notes.append(Comment(int(r["id"]), (r.get("user") or {}).get("login", ""),
+                                     f"(PR #{number}, review: {state}) {body}",
+                                     parse_time(r["submitted_at"]),
+                                     parse_time(r["submitted_at"])))
+        for c in self._get(f"repos/{repo}/pulls/{number}/comments?per_page=100", paginate=True):
+            where = f"{c.get('path')}:{c.get('line') or c.get('original_line') or '?'}"
+            note = Comment.from_api(c)
+            notes.append(replace(note, body=f"(PR #{number}, on {where}) {note.body}"))
+        for note in self.list_comments(repo, number):
+            notes.append(replace(note, body=f"(PR #{number}, comment) {note.body}"))
+        return sorted(notes, key=lambda n: n.created_at)
 
     # -- commits, checks, releases ----------------------------------------------
 

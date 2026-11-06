@@ -31,6 +31,8 @@ class StateMarker:
     # Triage (agent.triage): rounds posted, and whether the spec may be drafted.
     triage_round: int = 0
     triaged: bool = False
+    # The triage sized the task small (agent.fast_track): the spec comes in the code PR.
+    fast_track: bool = False
     # Default-branch commit of the repository's .dev-factory/ config last used for this issue.
     config_sha: str | None = None
     updated_at: str | None = None

@@ -84,7 +84,12 @@ factory identity or by a user whose repository permission is `write` or `admin` 
 as write). Otherwise the issue is skipped and reported, and nothing is written.
 
 Comments are filtered the same way: only comments by users with write access are given to Claude
-or count as answers. This applies to issue comments, PR reviews and inline review comments.
+or count as answers. This applies to issue comments, PR reviews, inline review comments and PR
+conversation comments. Every agent (spec, implementation, review) sees the maintainers' issue
+comments together with everything they wrote on the stage's PR, oldest first, and is told that
+these comments are the authority on scope: the newest wins over the issue text, the spec and
+the automated review. Rework feedback is the reviews of the reworked commit plus the PR
+conversation comments written since it was pushed.
 Even authorized text is untrusted data. It is fenced in the prompt and never interpreted as an
 orchestrator command.
 
@@ -155,7 +160,9 @@ The spec file is keyed only by issue number, so renaming the issue cannot orphan
 Before each human gate, a separate Claude run reviews the PR: the spec PR before `spec-review`,
 the code PR after its checks pass and before `review`. The reviewer is **read-only**
 (Read/Glob/Grep; repositories cannot change any agent's tool list) and
-sees the issue, maintainer comments, the diff and the checked-out PR head.
+sees the issue, the maintainer comments (including those on the PR), the diff and the
+checked-out PR head. It must not report what a maintainer asked for, and it must search the
+comments before it claims that a request does not exist.
 
 - The result is posted as a `COMMENT` review on the PR head commit, tagged
   `<!-- dev-factory:ai-review <sha> {"blocking": n, "suggestions": m} -->`. The tag on the
@@ -167,10 +174,16 @@ sees the issue, maintainer comments, the diff and the checked-out PR head.
   (spec: revise; code: `verify → implement`). This uses an agent attempt. A human's new
   change request starts a fresh attempt budget, in any stage, so it is never refused for
   attempts the review loop used.
-- **Advisory, bounded:** at most `policy.max_review_rounds` (default 2) reviews per cycle. When
-  rounds or attempts are exhausted, or the reviewer fails, the PR goes to the human gate anyway,
-  and the transition comment says what the review found. The counter resets when a human
-  requests changes.
+- **Blocking** is narrow: an explicit request of the issue or a maintainer not met, a bug, a
+  security or data-loss risk, tests the spec or project rules require (and no maintainer
+  waived), or a spec contradiction no implementation can satisfy. Everything else is a
+  suggestion.
+- **Advisory, bounded, first draft only:** at most `policy.max_review_rounds` (default 1)
+  reviews per PR. Each review's blocking findings are reworked once; the revision then goes
+  to the human gate without another review. When attempts are exhausted, or the reviewer
+  fails, the PR goes to the human gate anyway, and the transition comment says what the review
+  found. **Once a maintainer has reviewed the PR, no automated review runs on it again:** the
+  maintainer is its reviewer from then on.
 - The review never approves, requests changes or merges: GitHub forbids a PR's author from
   approving it, and the human gates stay human.
 
@@ -185,12 +198,25 @@ and the code, and posts one comment tagged `<!-- dev-factory:triage -->` in ASD-
 - **Found in the code**: facts that change the work (conflicts, hidden scope, risks);
 - **Questions**, numbered, each with a suggested answer ("1 yes, 2 as suggested").
 
-With questions, the issue goes to `needs-input`; a maintainer's reply resumes `spec` and the
-next round triages again with the answers. With no open questions, the spec starts. At most
-`policy.max_triage_rounds` (default 3) rounds; a failed run uses one. After the last round the
-spec starts with the stated assumptions. The spec agent sees the triage comments and the
+- **Size**: `small` (a few files, no data model, API, dependency or architecture change) or
+  `large`.
+
+With questions, the issue goes to `needs-input`; a maintainer's reply resumes `spec`, and the
+spec starts with the answers (no confirming round; the spec agent can still ask). With no open
+questions, the spec starts. A failed run uses one of `policy.max_triage_rounds` (default 3);
+after the last, the spec starts without triage. The spec agent sees the triage comments and the
 answers, in order. Triage runs only while there is no spec PR, and again after a human
 relabels the issue (the marker's counters reset).
+
+### Small tasks (`agent.fast_track: true`, needs triage)
+
+When the triage sizes a task `small`, it says so in its comment and there is no spec PR: once
+triage is done the issue moves `spec → implement`, and the implementation agent writes a short
+spec to the spec file and implements it in the same code PR. The spec file is the only path in
+the spec directory it may change, and the first run must write it. The automated review checks
+the spec against the issue and the code against the spec. **Merging the code PR approves the
+spec and the code together**: the human still approves the spec before it reaches the default
+branch, but after it was implemented, which is cheap for a small task.
 
 ## Stages
 
@@ -201,6 +227,7 @@ relabels the issue (the marker's counters reset).
 - **Review** (with `agent.review`): the open spec PR head is reviewed first; blocking findings
   start a revision (see Automated review).
 - **→ `spec-review`:** spec PR open with no rework due (or already merged), and reviewed.
+- **→ `implement`:** a small task (`agent.fast_track`), once triaged: no spec PR.
 - **→ `needs-input`:** Claude (spec or triage) returned questions. They are posted as an issue
   comment.
 - **→ `blocked`:** attempts exhausted; spec PR closed without merging; Claude changed other files.
@@ -212,7 +239,8 @@ relabels the issue (the marker's counters reset).
   without the spec file reaching the default branch.
 
 ### `factory:implement`
-- **Precondition:** the approved spec is on the default branch, otherwise → `blocked`.
+- **Precondition:** the approved spec is on the default branch (small tasks: none yet; the code
+  PR adds it), otherwise → `blocked`.
 - **Run agent** when there is no code PR, or rework is due. The worktree continues the existing code branch.
 - **Protected paths** (baseline `.github/**` and `.dev-factory/**`, plus the spec directory and
   the repository's `agent.protected_paths`): any change to them → `blocked`. CI definitions can

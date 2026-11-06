@@ -69,6 +69,7 @@ labels: {}                 # stage -> label name overrides
 agent:
   review: true
   triage: true             # discuss the issue in its comments before the spec
+  fast_track: true         # small tasks: the spec comes in the code PR (needs triage)
   protected_paths: ["docker-compose*.yml"]
 components:
   - name: mobile
