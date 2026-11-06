@@ -9,7 +9,7 @@ Python state machine decides what happens next.**
 
 [![CI](https://github.com/abegalinov/dev-factory/actions/workflows/ci.yml/badge.svg)](https://github.com/abegalinov/dev-factory/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-230%20passing-2ea44f)
+![Tests](https://img.shields.io/badge/tests-231%20passing-2ea44f)
 ![State](https://img.shields.io/badge/database-none%20%E2%80%94%20GitHub%20is%20the%20state-24292f?logo=github)
 ![Agent](https://img.shields.io/badge/agent-Claude%20Code-D97757)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)

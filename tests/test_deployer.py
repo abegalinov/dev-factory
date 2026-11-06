@@ -7,6 +7,7 @@ import pytest
 from dev_factory import deployer
 from dev_factory.config import ConfigError
 from dev_factory.deployer import (
+    UNLINKED_PASSES,
     Action,
     RegistryLogin,
     RuntimeFailure,
@@ -202,8 +203,10 @@ def test_only_changed_manifests_are_applied_again(env):
 def test_direct_push_and_foreign_merges_are_rejected_once(env):
     api, runtime, reconcile, workdir = env
     api.push(manifest(), commit="m2")  # no PR
+    for _ in range(UNLINKED_PASSES):
+        assert reconcile().outcome != "rejected"  # waiting for GitHub to link a PR
     state = reconcile()
-    assert state.outcome == "rejected" and "no PR" in state.detail
+    assert state.outcome == "rejected" and "no PR" in state.detail and state.unlinked == 0
     api.push(manifest(api="ghcr.io/acme/app/api:4444"), commit="m3",
              merged_by=[(5, "contributor")])
     assert reconcile().outcome == "rejected"
@@ -212,6 +215,15 @@ def test_direct_push_and_foreign_merges_are_rejected_once(env):
     assert runtime.applied == [] and api.deployments == []
     history = (workdir / ".deployer" / "history").read_text().splitlines()
     assert len(history) == 2 and all(" rejected " in line for line in history)
+
+
+def test_a_merge_github_links_late_is_still_applied(env):
+    api, runtime, reconcile, _ = env
+    api.push(manifest(), commit="m2")  # merged, but the PR link is not visible yet
+    assert reconcile().unlinked == 1 and runtime.applied == []
+    api.prs["m2"] = [(2, "maintainer")]
+    state = reconcile()
+    assert state.outcome == "applied" and state.unlinked == 0 and len(runtime.applied) == 1
 
 
 def test_failure_is_reported_and_not_retried_until_asked(env, tmp_path):

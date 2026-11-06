@@ -19,7 +19,9 @@ repository (main)                                production host
   reads two files through the API, never a checkout.
 - **Approval on the host.** A new manifest is applied only if the commit that last changed
   it belongs to a PR into the default branch merged by one of the host's `approvers`. A
-  direct push, or a PR merged by anyone else, is logged and not applied. Approvers, allowed
+  direct push, or a PR merged by anyone else, is logged and not applied. GitHub links a merge
+  to its PR a few seconds late, so a change with no PR waits 10 passes before it is rejected.
+  Approvers, allowed
   images and tokens live in the host's configuration, so no repository change can loosen
   them.
 - **Pinned images.** The manifest's `x-release` names the commit its images were built from;
