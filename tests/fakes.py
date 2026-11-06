@@ -91,6 +91,7 @@ class FakeGitHub:
         self.pulls: dict[int, _Pull] = {}
         self.reviews: dict[int, list[Review]] = defaultdict(list)
         self.feedback: dict[int, list[tuple[str, str, str]]] = defaultdict(list)
+        self.discussion: dict[int, list[Comment]] = defaultdict(list)  # PR reviews, inline
         self.branches: dict[str, str] = {"main": "sha-main-0"}
         self.files: dict[str, set[str]] = defaultdict(set)  # branch -> paths
         self.ci_checks: dict[str, list[Check]] = {}
@@ -167,8 +168,12 @@ class FakeGitHub:
     def request_changes(self, pr: int, text: str = "Please change X.",
                         by: str = MAINTAINER) -> None:
         head = self.pulls[pr].head_sha
-        self.reviews[pr].append(Review(by, "CHANGES_REQUESTED", head, self.clock.tick()))
+        now = self.clock.tick()
+        self.reviews[pr].append(Review(by, "CHANGES_REQUESTED", head, now))
         self.feedback[pr].append((by, head, text))
+        self.discussion[pr].append(Comment(next(self._ids), by,
+                                           f"(PR #{pr}, review: changes requested) {text}",
+                                           now, now))
 
     def push_human_commit(self, pr: int) -> str:
         sha = self.new_sha()
@@ -305,6 +310,12 @@ class FakeGitHub:
     def review_feedback(self, repo: str, number: int, commit_id: str) -> list[tuple[str, str]]:
         return [(a, t) for a, sha, t in self.feedback[number] if sha == commit_id]
 
+    def pr_discussion(self, repo: str, number: int) -> list[Comment]:
+        notes = [*self.discussion[number],
+                 *(replace(c, body=f"(PR #{number}, comment) {c.body}")
+                   for c in self.comments[number])]
+        return sorted(notes, key=lambda c: c.created_at)
+
     def branch(self, repo: str, branch: str) -> dict | None:
         if branch not in self.branches:
             return None
@@ -389,10 +400,11 @@ class AgentScript:
         self.steps.append((AgentResult(status, f"agent {status}", questions,
                                        output=output or {}), paths or []))
 
-    def triage(self, *questions: str, summary: str = "Add a settings page.") -> None:
+    def triage(self, *questions: str, summary: str = "Add a settings page.",
+               size: str = "large") -> None:
         """A triage run asking these questions (none: the issue is clear)."""
         self.push("done", output={
-            "summary": summary, "in_scope": ["the settings page"],
+            "summary": summary, "size": size, "in_scope": ["the settings page"],
             "out_of_scope": ["the profile page"], "assumptions": ["English only"],
             "code_findings": [{"path": "a.py", "line": 3, "finding": "a.py has no routes"}],
             "open_questions": [{"question": q, "suggested_answer": "yes"} for q in questions],

@@ -73,6 +73,7 @@ TRIAGE_SCHEMA = {
     "properties": {
         "status": {"type": "string", "enum": ["done", "failed"]},
         "summary": {"type": "string"},
+        "size": {"type": "string", "enum": ["small", "large"]},
         "in_scope": _STRINGS,
         "out_of_scope": _STRINGS,
         "assumptions": _STRINGS,
@@ -100,7 +101,7 @@ TRIAGE_SCHEMA = {
             },
         },
     },
-    "required": ["status", "summary", "in_scope", "out_of_scope", "assumptions",
+    "required": ["status", "summary", "size", "in_scope", "out_of_scope", "assumptions",
                  "code_findings", "open_questions"],
 }
 

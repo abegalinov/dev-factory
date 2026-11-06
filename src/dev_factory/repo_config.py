@@ -46,7 +46,7 @@ _MAX_TEXT = 20_000  # per file: these texts go into every prompt
 
 _REPO_KEYS = {"version", "specification", "labels", "agent", "components", "verification",
               "release", "policy"}
-_REPO_AGENT_KEYS = {"review", "triage", "protected_paths"}
+_REPO_AGENT_KEYS = {"review", "triage", "fast_track", "protected_paths"}
 _REPO_VERIFICATION_KEYS = {"mode", "required_checks", "commands", "timeout_seconds",
                            "demo_artifact"}
 _REPO_POLICY_KEYS = {f.name for f in fields(PolicyConfig)}
@@ -157,9 +157,13 @@ def _agent(
     agent = _section(raw, "agent", _REPO_AGENT_KEYS, where)
     review = agent.get("review", False)
     triage = agent.get("triage", False)
-    for key, value in (("review", review), ("triage", triage)):
+    fast_track = agent.get("fast_track", False)
+    for key, value in (("review", review), ("triage", triage), ("fast_track", fast_track)):
         if not isinstance(value, bool):
             raise ConfigError(f"{where}: agent.{key} must be a boolean")
+    if fast_track and not triage:
+        raise ConfigError(f"{where}: agent.fast_track needs agent.triage (the triage sizes "
+                          "the task)")
     prompts = factory.home / "prompts"
     for name in ("spec.md", "implement.md", *(["review.md"] if review else []),
                  *(["triage.md"] if triage else [])):
@@ -176,6 +180,7 @@ def _agent(
         review_prompt=prompts / "review.md" if review else None,
         triage=triage,
         triage_prompt=prompts / "triage.md" if triage else None,
+        fast_track=fast_track,
     )
 
 

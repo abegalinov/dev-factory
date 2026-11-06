@@ -28,7 +28,10 @@ DEFAULT_LABELS: dict[Stage, str] = {
 # Transitions that require proof (a merged PR, passing checks, an authorized actor)
 # must additionally be validated by the caller against live GitHub state.
 ALLOWED: dict[Stage, frozenset[Stage]] = {
-    Stage.SPEC: frozenset({Stage.SPEC_REVIEW, Stage.NEEDS_INPUT, Stage.BLOCKED}),
+    # spec -> implement: a small task (agent.fast_track) has no spec PR; its code PR carries
+    # the spec, and merging it approves both.
+    Stage.SPEC: frozenset({Stage.SPEC_REVIEW, Stage.IMPLEMENT, Stage.NEEDS_INPUT,
+                           Stage.BLOCKED}),
     Stage.SPEC_REVIEW: frozenset({Stage.IMPLEMENT, Stage.SPEC, Stage.BLOCKED}),
     Stage.IMPLEMENT: frozenset({Stage.VERIFY, Stage.NEEDS_INPUT, Stage.BLOCKED}),
     Stage.VERIFY: frozenset({Stage.REVIEW, Stage.IMPLEMENT, Stage.BLOCKED}),

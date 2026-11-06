@@ -97,7 +97,7 @@ class Observer:
             "review_enabled": bool(self.project.agent and self.project.agent.review),
             "triage_enabled": bool(self.project.agent and self.project.agent.triage),
         }
-        if stage is Stage.SPEC:
+        if stage is Stage.SPEC or (stage is Stage.IMPLEMENT and marker and marker.fast_track):
             fields["triage_notes"] = tuple(
                 c for c in comments if c.author == self.factory_login and TRIAGE_TAG in c.body)
 
@@ -109,6 +109,7 @@ class Observer:
                 fields["spec_changes_requested"] = changes_requested(pr, reviews)
                 if stage is Stage.SPEC:
                     fields["ai_review"] = self._ai_review(pr, reviews)
+                    fields["human_reviewed"] = self._human_reviewed(reviews)
         if stage in (Stage.SPEC_REVIEW, Stage.IMPLEMENT):
             fields["spec_file_on_default"] = self.gh.file_exists(
                 repo, spec_path(self.project.spec_directory, number),
@@ -124,6 +125,7 @@ class Observer:
                 if stage is Stage.VERIFY:
                     fields.update(self._verification(pr.number, pr.head_sha))
                     fields["ai_review"] = self._ai_review(pr, reviews)
+                    fields["human_reviewed"] = self._human_reviewed(reviews)
             if stage is Stage.RELEASE:
                 merge_sha = (marker.merge_sha if marker else None) or (
                     pr.merge_commit_sha if pr is not None and pr.merged else None)
@@ -141,6 +143,10 @@ class Observer:
             if parsed is not None and pr.head_sha.startswith(parsed.sha):
                 return parsed
         return None
+
+    def _human_reviewed(self, reviews: list[Review]) -> bool:
+        return any(r.author != self.factory_login and r.state != "PENDING"
+                   and self.has_write(r.author) for r in reviews)
 
     def _verification(self, pr_number: int, head_sha: str) -> dict[str, object]:
         repo = self.project.repository

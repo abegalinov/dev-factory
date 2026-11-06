@@ -21,6 +21,8 @@ HAPPY_PATH = [
 # Every allowed edge, written out independently of ALLOWED so changes to the table are deliberate.
 EXPECTED_EDGES = {
     (Stage.SPEC, Stage.SPEC_REVIEW), (Stage.SPEC, Stage.NEEDS_INPUT), (Stage.SPEC, Stage.BLOCKED),
+    # Small tasks (agent.fast_track): the code PR carries the spec; the engine decides when.
+    (Stage.SPEC, Stage.IMPLEMENT),
     (Stage.SPEC_REVIEW, Stage.IMPLEMENT), (Stage.SPEC_REVIEW, Stage.SPEC),
     (Stage.SPEC_REVIEW, Stage.BLOCKED),
     (Stage.IMPLEMENT, Stage.VERIFY), (Stage.IMPLEMENT, Stage.NEEDS_INPUT),
@@ -56,7 +58,8 @@ def test_every_work_stage_can_block(src):
 
 
 def test_human_gates_cannot_be_skipped():
-    assert not can_transition(Stage.SPEC, Stage.IMPLEMENT)
+    # spec -> implement exists only for small tasks, whose code PR carries the spec: the
+    # human still approves the spec, together with the code (see test_integration).
     assert not can_transition(Stage.IMPLEMENT, Stage.REVIEW)
     assert not can_transition(Stage.VERIFY, Stage.RELEASE)
 

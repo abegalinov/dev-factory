@@ -15,6 +15,12 @@ specification with these sections:
 7. **Assumptions**: each assumption you made, marked so a reviewer can reject it.
 
 Rules:
+- Size the spec to the task. A small fix needs a few lines per section; write "None" for
+  a section that does not apply. Do not add requirements, acceptance criteria or tests
+  that the issue and the maintainers did not ask for. Text, copy and configuration
+  changes need no automated tests unless a maintainer or the project rules ask for them.
+- The maintainers' comments on the issue and on the spec PR are the authority on scope.
+  Follow the newest one where they conflict with the issue text or an automated review.
 - If an ambiguity materially changes behavior or architecture and the repository cannot resolve
   it, report `needs_input` with concise, specific questions instead of guessing.
 - Never claim the specification is approved. Approval is a human merging the spec PR.

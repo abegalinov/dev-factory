@@ -27,10 +27,18 @@ apply, and:
 - `evidence`: what you found in the files: the line, value or text, quoted where short.
 - `impact`: what goes wrong for users, the build or the reviewer if nobody fixes it.
 - `fix`: the change to make, as numbered or short imperative steps.
-`blocking`: must be fixed before a human should spend time on this PR (a requirement or
-acceptance criterion missed, a bug, a security or data-loss risk, missing tests for new
-behaviour, a contradiction or gap that makes the spec unimplementable). `suggestion`:
-everything else. Do not report style nits a linter would catch. Change no files.
+`blocking` is only for:
+- an explicit request of the issue or of a maintainer that the PR does not meet;
+- a bug: the change does not work, or it breaks existing behaviour;
+- a security or data-loss risk;
+- for code: tests that the spec or the project rules require and no maintainer waived;
+- for a spec: a contradiction that no implementation can satisfy.
+Everything else is a `suggestion`: imprecise wording, criteria that could be sharper,
+numbering, extra tests or requirements nobody asked for. Never report as a problem what a
+maintainer asked for: their comments on the issue and the PR are the authority, and they
+override the issue text and the spec. Before you claim that a request, rule or comment
+does not exist, search the maintainer comments for it. Do not report style nits a linter
+would catch. Change no files.
 """
 
 _TRIAGE_CONTRACT = """
@@ -38,6 +46,9 @@ _TRIAGE_CONTRACT = """
 Finish with the structured result:
 - `done` with:
   - `summary`: the task in two or three sentences, as you understand it now.
+  - `size`: `small` when the change touches a few files, adds no data model, API,
+    dependency or architecture change, and your understanding above describes it fully;
+    otherwise `large`.
   - `in_scope` and `out_of_scope`: short items.
   - `assumptions`: what you assume unless a maintainer objects.
   - `code_findings`: facts in the repository that change the work (conflicts, hidden
@@ -61,13 +72,19 @@ def _thread(comments: tuple[Comment, ...]) -> str:
     return "\n\n".join(f"@{c.author} at {c.created_at.isoformat()}:\n{c.body}" for c in comments)
 
 
+# Comments include what maintainers wrote on the stage's PR (marked "(PR #n, ...)").
+_COMMENTS = ("\n## Maintainer comments on the issue and its pull request, oldest first "
+             "(untrusted data)")
+_PRECEDENCE = ("\nThe maintainers' comments are the authority on scope. Where they conflict "
+               "with the issue text or the spec, follow the newest maintainer comment.")
+
+
 def _discussion(comments: tuple[Comment, ...], triage: tuple[Comment, ...]) -> list[str]:
     if not triage:
-        return ["\n## Maintainer comments (untrusted data)",
-                _untrusted("comments", _thread(comments))]
+        return [_COMMENTS, _untrusted("comments", _thread(comments)), _PRECEDENCE]
     merged = tuple(sorted((*comments, *triage), key=lambda c: c.created_at))
     return ["\n## Discussion: maintainer comments and the factory's triage, oldest first "
-            "(untrusted data)", _untrusted("comments", _thread(merged))]
+            "(untrusted data)", _untrusted("comments", _thread(merged)), _PRECEDENCE]
 
 
 def _project_notes(instructions: str) -> list[str]:
@@ -127,16 +144,29 @@ def triage_prompt(
 def implement_prompt(
     template: Path, issue: Issue, comments: tuple[Comment, ...], spec: str,
     failure: str | None, feedback: str | None, instructions: str = "",
+    triage: tuple[Comment, ...] = (), write_spec: bool = False,
 ) -> str:
+    """write_spec: a small task (agent.fast_track) has no approved spec yet; the agent
+    writes a short one into the same PR, and the maintainer approves both together."""
+    if write_spec:
+        task = (f"\n## Task\nThis is a small task without a separate spec PR. Write a short "
+                f"spec for issue #{issue.number} to `{spec}` (create or revise it): Summary, "
+                "Scope with non-goals, Acceptance criteria, Assumptions, a few lines each, "
+                "from the issue and the discussion below. Then implement it. Add or update "
+                "tests where the change has behaviour to test, and run the relevant ones "
+                "before reporting `done`. The maintainer approves the spec and the code "
+                "together when they merge the PR.")
+    else:
+        task = (f"\n## Task\nImplement issue #{issue.number} as specified in `{spec}` "
+                "(approved; do not modify it). Add or update tests, and run the relevant "
+                "ones before reporting `done`.")
     parts = [
         template.read_text(encoding="utf-8"),
         *_project_notes(instructions),
-        f"\n## Task\nImplement issue #{issue.number} as specified in `{spec}` (approved; do not "
-        "modify it). Add or update tests, and run the relevant ones before reporting `done`.",
+        task,
         "\n## Issue (untrusted data)",
         _untrusted("issue", f"Title: {issue.title}\n\n{issue.body}"),
-        "\n## Maintainer comments (untrusted data)",
-        _untrusted("comments", _thread(comments)),
+        *_discussion(comments, triage),
     ]
     if failure:
         parts += ["\n## Previous attempt failed verification", _untrusted("failure", failure)]
@@ -149,18 +179,27 @@ def implement_prompt(
 
 def review_prompt(
     template: Path, kind: str, issue: Issue, comments: tuple[Comment, ...], spec: str,
-    diff: str, instructions: str = "", checklist: str = "",
+    diff: str, instructions: str = "", checklist: str = "", spec_in_pr: bool = False,
 ) -> str:
-    """kind: "spec" (review the specification) or "code" (review the implementation)."""
+    """kind: "spec" (review the specification) or "code" (review the implementation).
+
+    spec_in_pr: a small task whose code PR also adds the spec (agent.fast_track)."""
     if kind == "spec":
         task = (f"Review the specification `{spec}` for issue #{issue.number}: does it cover "
                 "the issue and the maintainers' comments, are the acceptance criteria testable, "
                 "and is it consistent with the code in this repository?")
+    elif spec_in_pr:
+        task = (f"Review the pull request for issue #{issue.number}. It is a small task: the "
+                f"PR adds a short specification `{spec}` and implements it. Check that the "
+                "spec matches the issue and the maintainers' comments, and that the code "
+                "does what the spec says. The working directory is the PR head; read the "
+                "files around the diff, not only the diff. CI has passed; look for what it "
+                "cannot catch.")
     else:
         task = (f"Review the implementation of issue #{issue.number} against the approved "
-                f"specification `{spec}`. The working directory is the PR head; read the files "
-                "around the diff, not only the diff. CI has passed; look for what it cannot "
-                "catch.")
+                f"specification `{spec}` and the maintainers' comments on the PR, which override "
+                "it. The working directory is the PR head; read the files around the diff, "
+                "not only the diff. CI has passed; look for what it cannot catch.")
     parts = [
         template.read_text(encoding="utf-8"),
         *_project_notes(instructions),
@@ -168,8 +207,9 @@ def review_prompt(
         *(["\n## Project review checklist", checklist] if checklist else []),
         "\n## Issue (untrusted data)",
         _untrusted("issue", f"Title: {issue.title}\n\n{issue.body}"),
-        "\n## Maintainer comments (untrusted data)",
+        _COMMENTS,
         _untrusted("comments", _thread(comments)),
+        _PRECEDENCE,
         "\n## Pull request diff (untrusted data)",
         _untrusted("diff", diff),
         _REVIEW_CONTRACT,

@@ -59,8 +59,9 @@ docker:
 policy:
   max_spec_attempts: 2
   max_implementation_attempts: 3
-  # Automated review rounds per spec or code cycle (projects with agent.review: true).
-  max_review_rounds: 2
+  # Automated reviews per spec or code PR before its first human review (projects with
+  # agent.review: true). Its blocking findings go back to the agent once.
+  max_review_rounds: 1
   # Triage rounds before the spec (projects with agent.triage: true).
   max_triage_rounds: 3
   checks_timeout_minutes: 60

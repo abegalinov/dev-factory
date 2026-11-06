@@ -148,6 +148,8 @@ class Snapshot:
     # Automated review (agent.review): the factory's review of the stage's PR head, if any.
     review_enabled: bool = False
     ai_review: AIReview | None = None
+    # A maintainer has reviewed the stage's PR: from then on they are its reviewer.
+    human_reviewed: bool = False
     # Triage (agent.triage): the factory's triage comments on the issue, oldest first.
     triage_enabled: bool = False
     triage_notes: tuple[Comment, ...] = ()
@@ -203,6 +205,7 @@ def effective_marker(snap: Snapshot, stage: Stage) -> StateMarker:
         return StateMarker(
             stage=stage, spec_pr=marker.spec_pr, code_pr=marker.code_pr,
             merge_sha=marker.merge_sha, candidate_posted=marker.candidate_posted,
+            fast_track=marker.fast_track,
         )
     # An interrupted factory transition: the label never changed, so re-decide from it.
     return marker.evolve(stage=stage)
@@ -268,19 +271,20 @@ def _review_gate(
 
     Returns RUN_REVIEW when the head has no review yet and rounds remain, or a TRANSITION
     placeholder (target unset) carrying the reason when blocking findings should be reworked.
-    The review is advisory: once rounds or attempts run out, the PR goes to the humans.
+    Each review's blocking findings are reworked once; the revision goes to the humans
+    without another review once max_review_rounds reviews ran. The review is advisory and
+    only precedes the first human review: after that, the maintainer is the reviewer.
     """
-    if not snap.review_enabled:
+    if not snap.review_enabled or snap.human_reviewed:
         return None
     review = snap.ai_review
-    rounds_left = marker.review_round < policy.max_review_rounds
     if review is None:
-        if not rounds_left:
+        if marker.review_round >= policy.max_review_rounds:
             return None
         return Decision(Action.RUN_REVIEW,
                         f"automated review of PR #{pr.number} (round {marker.review_round + 1})",
                         stage=stage, marker=marker.evolve(review_round=marker.review_round + 1))
-    if review.blocking and rounds_left and rework_allowed:
+    if review.blocking and rework_allowed:
         return Decision(Action.TRANSITION,
                         f"automated review found {review.blocking} blocking issue(s) "
                         f"on PR #{pr.number}", stage=stage)
@@ -288,10 +292,12 @@ def _review_gate(
 
 
 def _review_note(snap: Snapshot, marker: StateMarker) -> str:
-    if not snap.review_enabled:
+    if not snap.review_enabled or snap.human_reviewed:
         return ""
     review = snap.ai_review
     if review is None:
+        if marker.review_round:
+            return "; revised after the automated review's findings"
         return "; automated review unavailable"
     if review.blocking:
         return (f"; automated review: {review.blocking} blocking issue(s) remain after "
@@ -330,6 +336,9 @@ def _decide_spec(snap: Snapshot, marker: StateMarker, policy: PolicyConfig) -> D
                             f"triage the issue (round {marker.triage_round + 1})", stage=stage,
                             marker=marker.evolve(triage_round=marker.triage_round + 1))
         marker = marker.evolve(triaged=True)  # rounds used up: draft with its assumptions
+    if pr is None and marker.fast_track and marker.triaged:
+        return _move(stage, Stage.IMPLEMENT, "small task: the code PR carries the spec, and "
+                     "merging it approves both", marker.evolve(attempt=0, rework_base=None))
     if marker.attempt >= policy.max_spec_attempts:
         detail = f": {marker.last_failure}" if marker.last_failure else ""
         return _block(stage, f"spec drafting failed {marker.attempt} times{detail}", marker)
@@ -367,7 +376,7 @@ def _decide_spec_review(snap: Snapshot, marker: StateMarker, policy: PolicyConfi
 def _decide_implement(snap: Snapshot, marker: StateMarker, policy: PolicyConfig) -> Decision:
     pr = snap.code_pr
     stage = Stage.IMPLEMENT
-    if not snap.spec_file_on_default:
+    if not snap.spec_file_on_default and not marker.fast_track:
         return _block(stage, "the approved spec is not on the default branch", marker)
     if pr is not None and pr.closed_unmerged:
         return _block(stage, f"code PR #{pr.number} was closed without merging", marker)
@@ -483,8 +492,11 @@ def _decide_needs_input(snap: Snapshot, marker: StateMarker, policy: PolicyConfi
     if not answers:
         return _wait(stage, "waiting for a maintainer to answer the factory's question")
     pr = snap.spec_pr if resume is Stage.SPEC else snap.code_pr
+    # Answers to the triage's questions go straight to the spec: a confirming round
+    # would only repeat them.
+    triaged = marker.triaged or (resume is Stage.SPEC and marker.triage_round > 0)
     return _move(stage, resume, f"{answers[-1].author} answered",
-                 marker.evolve(resume_stage=None, asked_at=None,
+                 marker.evolve(resume_stage=None, asked_at=None, triaged=triaged,
                                rework_base=pr.head_sha if pr and pr.is_open else None))
 
 

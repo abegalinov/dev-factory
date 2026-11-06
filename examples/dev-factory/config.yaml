@@ -35,9 +35,13 @@ agent:
   review: true
   # Before the spec, a read-only agent discusses the issue in its comments: its
   # understanding, scope, assumptions, problems found in the code, and questions with
-  # suggested answers. A maintainer's reply starts the next round; with no open questions
-  # the spec starts. Default: false
+  # suggested answers. A maintainer's reply, or no open questions, starts the spec.
+  # Default: false
   triage: true
+  # A task the triage sizes small skips the spec PR: the implementation agent writes a
+  # short spec into the code PR, and merging that PR approves the spec and the code.
+  # Needs triage. Default: false
+  fast_track: false
   # Added to the factory's baseline (.github/**, .dev-factory/**, and the spec directory for
   # implementation runs). An agent change to any of these blocks the issue. Keep CI,
   # deployment, infrastructure and signing human-owned. Default: []
@@ -123,8 +127,9 @@ policy:
   max_spec_attempts: 2
   # Implementation attempts per cycle (CI failures and review findings each use one).
   max_implementation_attempts: 3
-  # Automated review rounds per spec or code cycle; then the PR goes to a human anyway.
-  max_review_rounds: 2
+  # Automated reviews per PR before its first human review; each one's blocking findings
+  # go back to the agent once, then the PR goes to a human anyway.
+  max_review_rounds: 1
   # Triage rounds before the spec (agent.triage); then the spec uses the stated assumptions.
   max_triage_rounds: 3
   # Missing or pending checks this long after the head commit block the issue.

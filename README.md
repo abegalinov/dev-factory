@@ -9,7 +9,7 @@ Python state machine decides what happens next.**
 
 [![CI](https://github.com/abegalinov/dev-factory/actions/workflows/ci.yml/badge.svg)](https://github.com/abegalinov/dev-factory/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-223%20passing-2ea44f)
+![Tests](https://img.shields.io/badge/tests-230%20passing-2ea44f)
 ![State](https://img.shields.io/badge/database-none%20%E2%80%94%20GitHub%20is%20the%20state-24292f?logo=github)
 ![Agent](https://img.shields.io/badge/agent-Claude%20Code-D97757)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
@@ -130,6 +130,7 @@ stateDiagram-v2
     spec --> spec_review: spec PR opened
     spec_review --> spec: changes requested
     spec_review --> implement: 🙋 spec PR merged
+    spec --> implement: small task, spec in the code PR
     implement --> verify: code PR opened
     verify --> implement: checks failed
     verify --> review: ✅ checks green
@@ -149,7 +150,7 @@ stateDiagram-v2
 
 | Label | Who acts | What happens |
 |---|---|---|
-| `factory:spec` | 🤖 agent | Triages the issue in its comments (optional), then drafts the spec as a PR. An automated reviewer checks it first |
+| `factory:spec` | 🤖 agent | Triages the issue in its comments (optional), then drafts the spec as a PR. An automated reviewer checks the first draft. A small task skips the spec PR (`agent.fast_track`): its code PR carries the spec |
 | `factory:spec-review` | 🙋 human | Merge the spec PR to approve it, or request changes |
 | `factory:implement` | 🤖 agent | Implements the approved spec with tests, opens the code PR |
 | `factory:verify` | ✅ CI | The repository's own checks run. Failures go back to the agent with the log excerpt |
