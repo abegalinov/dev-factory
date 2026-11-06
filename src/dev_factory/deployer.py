@@ -334,6 +334,7 @@ class State:
     stack: str = ""       # ... its stack
     manifest: str = ""    # ... and the file it was applied from, in the work directory
     detail: str = ""
+    unlinked: int = 0     # passes `blob` has waited for GitHub to link its commit to a PR
 
     @classmethod
     def load(cls, path: Path) -> "State":
@@ -351,6 +352,8 @@ class State:
 
 
 # -- the deployer ---------------------------------------------------------------------------
+
+UNLINKED_PASSES = 10  # how long a manifest change without a PR waits before it is rejected
 
 class TargetRun:
     """One reconcile pass for one target."""
@@ -395,8 +398,17 @@ class TargetRun:
 
         # A new manifest: decide once, whatever happens next.
         commit = self.gh.last_change(self.repo, deploy.manifest, head)
-        decision = decide(text, self.gh.merged_by(self.repo, commit, branch), self.target)
+        approvals = self.gh.merged_by(self.repo, commit, branch)
+        if not approvals and state.unlinked < UNLINKED_PASSES:
+            # GitHub links a merge commit to its PR seconds after the merge: look again.
+            state.unlinked += 1
+            state.save(self.state_path)
+            log.info("%s: %s changed in %s, not linked to a PR yet", self.repo,
+                     deploy.manifest, commit[:12])
+            return state
+        decision = decide(text, approvals, self.target)
         state = replace(state, head=head, blob=blob, release=decision.release, deployment=0,
+                        unlinked=0,
                         detail=f"{deploy.manifest} changed in {commit[:12]}: {decision.reason}")
         if decision.action is Action.REJECT:
             log.warning("%s: not applied: %s", self.repo, state.detail)
@@ -558,6 +570,7 @@ def retry(config: DeployerConfig, repository: str) -> str:
         raise ConfigError(f"{repository}: a pass is applying right now")
     previous = f"{state.outcome or 'nothing'} {state.blob[:12]}".strip()
     state.head = state.blob = state.outcome = state.release = ""
+    state.unlinked = 0
     state.save(path)
     return previous
 
